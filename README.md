@@ -1,291 +1,93 @@
 # Receive & Share
 
-Transfer EPUB and PDF files over local Wi-Fi on a Kobo Libra 2 using NickelMenu.
-The Kobo's built-in browser displays a QR code, short address, and pairing code.
-Pair in your phone's browser to send multiple books, browse book folders, or download
-books individually or as a ZIP. No account, cloud service, hotspot,
-Python installation, or kernel change is needed.
+I made this so my wife could put books on her Kobo without a USB cable.
 
-## Screenshots
+Send EPUB and PDF files from a phone or computer over local Wi-Fi, using a browser.
+You can also browse book folders and download individual books or a ZIP. A basic
+browser view is provided for Kobo-to-Kobo sharing.
 
-The source Kobo shows the connection details and received books; the paired client
-queues files and shows progress for each upload.
+Tested on **Kobo Libra 2, firmware 4.38.23697**. Uses
+[NickelMenu](https://github.com/pgaskin/NickelMenu) and
+[NickelDBus](https://github.com/shermp/NickelDBus). Other models and firmware are
+untested; [NickelMenu currently does not support firmware 5.x](https://pgaskin.net/NickelMenu/).
+iOS and downloading and importing on a second Kobo still need testing.
 
-| Source Kobo | Phone client |
-| --- | --- |
-| <a href="docs/screenshots/kobo-connection-received.png"><img src="docs/screenshots/kobo-connection-received.png" alt="Kobo connection screen with QR code, pairing code, sharing settings and a received-file receipt" width="360"></a> | <a href="docs/screenshots/mobile-upload-progress.jpg"><img src="docs/screenshots/mobile-upload-progress.jpg" alt="Phone client uploading a sample PDF with its progress bar and Cancel button" width="280"></a> |
-
-The file browser supports individual downloads and a selection across folders.
-The selection summary sits above the full list of filenames, paths, types and sizes.
-
-[<img src="docs/screenshots/desktop-selected.jpg" alt="Desktop file browser with three selected books and a detailed bulk-download summary" width="900">](docs/screenshots/desktop-selected.jpg)
-
-<details>
-<summary>Sharing controls on the Kobo</summary>
-
-Choose which books the other device can download, or remember **Share all** for
-future sessions. The received-files screen records uploads from the current session.
-
-| Books to share | Received this session |
-| --- | --- |
-| <a href="docs/screenshots/kobo-sharing.png"><img src="docs/screenshots/kobo-sharing.png" alt="Kobo sharing settings with Share all, selected books and Remember Share all controls" width="360"></a> | <a href="docs/screenshots/kobo-session-files.png"><img src="docs/screenshots/kobo-session-files.png" alt="Kobo session history showing a disposable test PDF, its path, size and receipt time" width="360"></a> |
-
-</details>
-
-See the [complete screenshot index](docs/screenshots/README.md) for all 27 images,
-including pairing, upload queues, file details, the basic client, connection loss
-and the finished-session screen. An [HTML gallery](docs/screenshots/index.html)
-is also available for viewing locally.
-
-Captured on 29 October 2026. Kobo images are actual Libra 2 framebuffer captures.
-Client images use disposable sample books at desktop and phone-sized browser
-viewports; the phone images are not physical Android/iOS captures. The finished
-screen is a sample render of the production template with dummy receipts.
+The app avoids direct access to Kobo's database and firmware internals. It should
+therefore keep working across firmware updates, provided NickelMenu and NickelDBus
+remain compatible.
 
 ## Install
 
-### Copy one installer file
+Choose according to what is already installed:
 
-Choose the package matching what is **already installed**:
+| Already installed | Package |
+| --- | --- |
+| NickelMenu and NickelDBus | `dist/KoboRoot.tgz` |
+| NickelMenu only | `dist/with-nickeldbus/KoboRoot.tgz` |
+| Neither | `dist/first-install/KoboRoot.tgz` |
 
-| Already installed | Package | Bundled dependencies |
-| --- | --- | --- |
-| NickelMenu and NickelDBus | `dist/KoboRoot.tgz` | None; existing versions are preserved |
-| NickelMenu only | `dist/with-nickeldbus/KoboRoot.tgz` | NickelDBus 0.2.0 |
-| Neither (first installation) | `dist/first-install/KoboRoot.tgz` | NickelMenu v0.6.0 and NickelDBus 0.2.0 |
+Use dependency bundles only for missing dependencies; they do not detect versions
+and will replace the bundled dependency binaries. App settings, received books and
+other NickelMenu configuration files are preserved.
 
-NickelMenu is installed if its menu appears on the Kobo. NickelDBus normally has
-the file `.adds/nickeldbus` on USB-visible storage. Bundled dependencies are pinned
-official releases with their MIT licenses included. These packages target the
-Kobo Libra 2 on firmware 4.38.23697 / 4.x; NickelMenu does not support firmware 5.x.
+1. Finish any active transfer session and connect the Kobo by USB.
+2. Copy the chosen **KoboRoot.tgz**, without extracting or renaming it, into `.kobo`.
+3. Safely eject, unplug, and wait for installation and restart.
 
-1. Finish any active Receive & Share session, then connect the Kobo by USB.
-2. Copy the chosen **`KoboRoot.tgz` file itself**, without extracting it, into the
-   Kobo's hidden `.kobo` folder. Its filename must remain `KoboRoot.tgz`.
-3. Safely eject and disconnect. Wait for installation and the automatic restart,
-   then open **NickelMenu → Receive & Share**.
+The archives pass local packaging tests but have not yet been installed through
+an actual Kobo update cycle. [Manual ZIP installation and other details](docs/USAGE.md).
 
-All variants preserve existing Receive & Share settings, received books and other
-NickelMenu configuration files. Only our `.adds/nm/kobo-receive` menu entry is
-replaced. Dependency bundles **replace their named dependency binaries** and do
-not detect installed versions: use them only when those dependencies are missing.
-The app-only archive does not touch either dependency. No boot scripts, SSH
-configuration or firmware binaries are replaced.
+## Use
 
-### Manual folder installation
+1. Connect both devices to the same Wi-Fi.
+2. Open **NickelMenu → Receive & Share**. Startup may take a while. If it stalls,
+   turn Wi-Fi on manually, connect to a network and launch it again.
+3. Scan the QR code or enter the address, then enter the pairing code.
+4. Choose files to upload, or open **Files on Kobo** to download books.
+5. Tap **Finish & refresh library** on the source Kobo when done. It stops the
+   server and asks Kobo to import received books. Closing the source browser also
+   finishes the session after about 20 seconds when its heartbeat is working.
 
-With NickelMenu and NickelDBus already installed, the original ZIP method remains
-available without a restart:
+Uploads go into `Received Books`. Existing files are kept; duplicates get numbered
+names. The limit is **100 MiB per file**, with a **20-minute session**. Pairing codes
+expire after two minutes; paired browsers stay connected for the session.
 
-The production interface is embedded from `receiver/web/` into the executable.
-The earlier [local prototype](prototype/index.html) and [UI plan](prototype/PLAN.md)
-are retained for reference; `node prototype/server.mjs` serves that separate,
-simulated prototype at http://127.0.0.1:4173.
+**What to share** defaults to **Share only selected books**, with nothing selected.
+Select books and save, or choose **Share all**. Remembering Share all enables it on
+future launches; individual selections last only for the current session.
 
-1. Connect the Kobo by USB and tap Connect.
-2. Extract `dist/kobo-receive-libra2.zip` on your computer with hidden files visible.
-3. Copy its `.adds/kobo-receive` folder into the Kobo's `.adds` folder.
-4. Copy its `.adds/nm/kobo-receive` **file** into the Kobo's `.adds/nm` folder.
-   Merge the folders; retain existing NickelMenu configuration files.
-5. Safely eject and disconnect USB. No firmware update or reboot is required.
+Keep the Kobo awake and avoid USB during transfers. If Wi-Fi drops, leave the
+client page open and reconnect the Kobo. Interrupted uploads restart from the
+beginning. Transfers use local HTTP without encryption.
 
-Only the menu configuration file belongs in `.adds/nm`. The executable and
-shell script belong in `.adds/kobo-receive`.
+## Screenshots
 
-## Receive
+| Kobo | Phone browser |
+| --- | --- |
+| <img src="docs/screenshots/kobo-connection-received.png" alt="Kobo connection screen" width="300"> | <img src="docs/screenshots/mobile-upload-progress.jpg" alt="Upload progress in a phone-sized browser" width="240"> |
 
-1. Connect Kobo and phone to the same Wi-Fi. Guest networks with client isolation
-   may prevent the connection. Finish connecting before opening the receiver.
-2. On Kobo, choose **NickelMenu → Receive & Share**.
-3. Scan the QR code with the phone's camera; open the link in your browser.
-4. Enter the six-digit code shown on the source Kobo. Codes expire after two
-   minutes; tap **New code** on the Kobo if needed. Already paired browsers stay connected.
-5. Choose multiple EPUB/PDF files and tap **Send files**. Uploads run sequentially
-   with progress, cancellation, and retry. Wait for each file's **Received** confirmation.
-6. On Kobo, tap **Finish & refresh library** below the QR code. It stops new transfers, waits
-   for active transfers, and asks Nickel to scan the books. Close the window to return.
-   The duplicate finish menu entry has been removed; the button is on the Kobo page.
-
-The QR-page button requires [NickelDBus](https://github.com/shermp/NickelDBus).
-Install the official `KoboRoot.tgz` from its releases into `.kobo`, then eject;
-the Kobo automatically installs the helper and restarts. NickelDBus 0.2.0 is the
-version used for this device. The ZIP itself does not bundle or install it.
-
-Books are saved in `Received Books` on the Kobo's USB-visible storage.
-Existing books are never replaced: duplicates receive numbered names.
-The receiver accepts up to 100 MiB per book and expires after 20 minutes.
-During a Linux/Kobo session it temporarily enables the native ForceWifiOn setting
-and reconnects Wi-Fi so idle power saving does not drop the connection. On normal
-exit it restores the previous preference and reconnects again. A restoration marker
-allows recovery on the next launch after an abnormal exit. `-keep-wifi=false` opts
-out. The Kobo still needs to stay awake during transfers.
-Keep the Kobo awake and don't connect USB during a transfer. If it sleeps or
-loses Wi-Fi, reconnect it while keeping the phone page open.
-
-## Local name, sharing, and reconnecting
-
-The source screen offers **Local name / IP address** QR choices, keeping the choice
-for that receiving session. A stable random
-name such as `kobo-a1b2c3d4.local:8080` is saved in `settings.json` beside the
-receiver. **Device name** changes it for the next session. mDNS probes for naming
-conflicts, and a numeric IP fallback remains available. Wi-Fi address changes cause
-advertising to restart without clearing the running session. Open the phone page
-using the .local address for reconnection across IP changes; an already-loaded
-numeric-IP page cannot follow a different address automatically.
-
-Discovery follows the app's own network announcements through the pinned mDNS
-library's public browsing API. It checks a per-run discovery identifier, interface,
-IP and port, and refreshes the QR address and accepted hostname after conflict
-renames. Fresh browse windows also detect a hostname-only rename. The separate
-DNS-SD service-instance label is shortened to leave room for conflict suffixes;
-the configured hostname keeps its full name. No dependency patch is required.
-
-On the source Kobo, **What to share** selects **Share all** or specific books.
-**Remember Share all for next time** persists that choice. Specific selections
-last for the current session, including selections saved across sharing pages.
-The default shares no books: paired devices can upload, but see no downloads until
-the source permits them. Listing, individual downloads, review, and ZIP endpoints
-all enforce this scope. Downloads already underway can finish after a scope change.
-
-The enhanced phone page retains its queue, selected books, and folder during a
-connection loss. It checks connectivity, retries entire interrupted files, and
-uses per-client upload IDs to recover saved confirmations without duplicate books.
-If the receiver restarts, pair again within the loaded page. Interrupted files from
-the old session require an explicit retry after checking the library; queued files
-and their in-memory file handles stay on the page. Reloading or closing the phone
-page does not preserve those file handles. ZIPs and individual downloads use normal
-browser downloads; interrupted downloads are not automatically restarted by the app.
-
-The source Kobo page sends a local JavaScript heartbeat every three seconds.
-After two successful heartbeats, closing that page triggers **Finish & refresh
-library** after a 20-second grace period. Navigation between local settings pages
-continues the heartbeat. The Linux monotonic clock excludes suspended time from
-the grace period. Wi-Fi loss on a phone does not affect this loopback heartbeat.
-Without working JavaScript, automatic finishing never arms; the manual button
-remains available. `-auto-finish=false` disables this behavior. It is enabled by
-default on Linux and disabled by default for the Windows development server.
-
-## Browse and download
-
-**Files on Kobo** lists EPUB/PDF files across user book folders, with search,
-sorting, individual downloads, and selection across folders. The selection summary
-is followed by every selected filename, full storage path, size, and file type.
-Select **Download ZIP** and review the full list before starting the download.
-ZIPs preserve folder paths, stream directly from the Kobo without recompression,
-and are limited to 100 books / 512 MiB per archive. Keep both devices awake.
-
-For an older browser, select **Basic / Kobo browser view** when pairing, or follow
-that link afterward. It uses plain HTML without JavaScript, shows 100 books per
-page, and offers ordinary download links and a ZIP review form. Selection in this
-view applies to the current page. High-contrast CSS controls replace the Kobo
-browser’s native checkbox/radio painting while retaining real HTML inputs.
-Buttons and text fields also use flat, high-contrast styling and explicit
-sans-serif fonts, with touch-sized controls and visible focus outlines. Kobo-to-Kobo transfer uses the receiving Kobo's
-browser to pull individual books from the source; ZIPs are mainly for phones and
-computers. Native Kobo download/import behavior still needs testing with a second Kobo.
-
-Pairing uses a two-minute, six-digit code with ten attempts and a one-second attempt
-interval. Successful pairing creates a random, HttpOnly browser-session cookie;
-form submissions also require a CSRF token. All paired access ends when the receiver
-stops. Hidden/system folders and symlinks are excluded, and file access is confined
-to the configured storage root. There are no remote delete or rename operations.
-Downloads also require the exact visible directory-entry path, rejecting FAT/Windows
-short-name aliases that could otherwise reach hidden books. Request deadlines cover
-Host rejection, and shutdown bounds the draining of non-transfer requests after
-active transfers complete. Finish can wait for progressing transfers beyond the
-normal page deadline. Re-pairing cancels old uploads and invalidates their callbacks
-so an interrupted file requires an explicit retry in the new session.
-Transfers use HTTP on your local network (not encryption). The QR/code screen and
-Finish & refresh library route are accessible only through loopback on the source Kobo.
-
-## Troubleshooting
-
-- A startup error: make sure Wi-Fi is connected, then retry. Reconnect USB to read
-  `.adds/kobo-receive/receiver.log` if needed.
-- Phone cannot connect: same Wi-Fi, no guest/client isolation, and no VPN blocking
-  local addresses. Try the printed URL directly. Keep Kobo awake.
-- Missing books: run Finish & refresh library; check `Received Books` by USB.
-- Session expired: Finish & refresh library, then Receive & Share and scan the new QR.
-
-## Verified device
-
-The QR screen, PDF upload from Fennec on Android, and QR-page Finish & refresh library
-button were confirmed working on a Kobo Libra 2 with firmware **4.38.23697**
-(Linux **4.1.15-00868-g58a2758be07**) on 28 October 2026. Live tests also observed
-Nickel's `pfmDoneProcessing` completion signal. Other models and firmware need
-their own device validation.
-
-On 29 October 2026 the expanded receiver was installed and tested on this device:
-PIN/cookie pairing, modern and basic uploads, book listing, byte-for-byte downloads,
-and streamed ZIP contents passed. The .local hostname resolved from Windows.
-A browser fault proxy verified whole-file retry after a dropped connection and
-receipt recovery after a lost success response, with no extra saved copies.
-The real Kobo browser ran the heartbeat, and closing it triggered the native
-library scan and stopped the receiver. The local-name/IP QR switch was checked
-on the real display. Wi-Fi retention was observed enabled during the session;
-finishing produced the native completion signal, stopped receiving, restored
-ForceWifiOn=false, and removed the restoration marker. The centered QR/pairing screen was checked using
-a framebuffer screenshot. The enhanced interface was also exercised in a desktop
-browser, including multi-file uploads and a downloaded ZIP. A second Kobo and iOS
-browser have not yet been available for end-to-end testing.
-
-## Uninstall
-
-Run Finish & refresh library before connecting USB. Remove `.adds/nm/kobo-receive` and the
-`.adds/kobo-receive` directory. Keep `Received Books` to retain uploaded books.
-NickelDBus is separate: delete `.adds/nickeldbus` and reboot to uninstall that helper.
+[All screenshots, including desktop views](docs/screenshots/README.md).
+Phone screenshots use a narrow desktop browser viewport, not a physical phone.
 
 ## Build
 
-Go 1.26 or newer and the pinned modules in `receiver/go.mod` are required.
-The package includes third-party dependency licenses.
-On Windows, `./build.ps1` runs tests, builds the ARM executable, and creates the
-install ZIP. It also requires Node.js for the local HTTP smoke test. Use
-`./build.ps1 -Go C:\path\to\go.exe` to choose a compiler explicitly.
+Requires Go 1.26+ and Node.js. From PowerShell:
 
-`./build-installers.ps1` runs that build and creates the three `KoboRoot.tgz`
-variants listed above. It downloads the pinned official dependency archives and
-licenses, checks their SHA-256 hashes and member allowlists, and runs installer
-tests. `-SkipBuild` packages an already-built application. The standalone Go
-packager is in `installer/`; dependency downloads and outputs stay under ignored
-`dist/`. Installer tests check settings/menu preservation, ARM architecture,
-archive paths, executable permissions and explicit dependency selection.
-
-For a manual build, from `receiver`:
-
-```sh
-go test ./...
-CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags='-s -w' -o ../package/.adds/kobo-receive/kobo-receive .
+```powershell
+.\build-installers.ps1
 ```
 
-For a real local test server, create separate storage and temporary directories,
-then run `go run . -root PATH_TO_STORAGE -dest PATH_TO_STORAGE/Received -temp PATH_TO_TEMP -ip 127.0.0.1`.
-Open http://127.0.0.1:8080/screen to see the pairing code, then open the root address
-to pair. This server reads and writes actual files in those directories.
+This builds and tests the app, fetches and verifies the pinned dependencies, and
+creates all three installers in `dist/`.
+[Build and packaging notes](installer/README.md).
 
-The executable is static ARMv7 Linux. The package uses NickelMenu's documented
-modal browser, command chain, and `rescan_books` actions, plus NickelDBus for the
-web button; it does not write to the Kobo database directly.
-The menu starts asynchronously and waits for the Wi-Fi reconnect to settle before
-opening the browser, avoiding a native connection prompt during startup.
-The launcher enables IPv4 loopback (`127.0.0.1`) for the Kobo browser because
-stock firmware may leave `lo` unconfigured. This is a runtime change; it does
-not change saved Wi-Fi network credentials or firmware files.
+## Uninstall
 
-`tools/` contains optional on-device deployment and import checks. SSH setup,
-private keys, device backups, downloaded toolchains, and retired prototypes are
-kept outside this repository. Generated binaries and build caches are ignored.
+Finish the session, connect by USB, and remove `.adds/nm/kobo-receive` and
+`.adds/kobo-receive`. Keep `Received Books`. NickelMenu and NickelDBus are separate
+and remain installed.
 
-QR encoder: https://github.com/skip2/go-qrcode (MIT; license included in package).
-NickelMenu documentation: https://github.com/pgaskin/NickelMenu/blob/master/res/doc
+## Contributing
 
-### HTTP port
-
-The server accepts `-port` (default `8080`). On the Kobo, optionally create
-`.adds/kobo-receive/port.txt` containing a number from 1 to 65535, then finish
-and restart the app. The launcher, health check, browser and QR addresses use
-that port. A running session keeps its port until it stops.
-Port 80 removes the port suffix from addresses. Port 8080 permits use without
-privileged-port permission on ordinary Linux hosts; it adds no encryption or
-authentication. Leave `port.txt` absent to retain the default.
-
+Forks and pull requests are welcome. I would also appreciate testing on other Kobo
+readers. Please include the model, firmware version, and what worked or failed.
