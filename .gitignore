@@ -5,6 +5,8 @@
 /receiver/.gomodcache/
 /.toolchain/
 /package/README.md
+/package/LICENSE
+/package/.adds/kobo-receive/LICENSE
 /package/.adds/kobo-receive/kobo-receive
 
 # Device backups, generated diagnostics, and credentials do not belong here.

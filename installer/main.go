@@ -130,6 +130,7 @@ func collect(packageDir, inputs, dependencies string) (map[string]file, error) {
 		{".adds/kobo-receive/kobo-receive", app + "kobo-receive", 0755},
 		{".adds/kobo-receive/control.sh", app + "control.sh", 0755},
 		{".adds/kobo-receive/QR-LICENSE.txt", app + "QR-LICENSE.txt", 0644},
+		{".adds/kobo-receive/LICENSE", app + "LICENSE", 0644},
 		{".adds/nm/kobo-receive", "mnt/onboard/.adds/nm/kobo-receive", 0644},
 		{"README.md", app + "README.md", 0644},
 	} {

@@ -22,6 +22,7 @@ func fixture(t *testing.T) string {
 		".adds/kobo-receive/kobo-receive":            elf,
 		".adds/kobo-receive/control.sh":              []byte("#!/bin/sh\r\necho ready\r\n"),
 		".adds/kobo-receive/QR-LICENSE.txt":          []byte("license"),
+		".adds/kobo-receive/LICENSE":                 []byte("application MIT license"),
 		".adds/kobo-receive/licenses/dependency.txt": []byte("license"),
 		".adds/nm/kobo-receive":                      []byte("menu_item:main:Receive & Share:cmd_spawn:quiet:launch"),
 		"README.md":                                  []byte("readme"),
@@ -51,6 +52,9 @@ func TestArchivePreservesUserSettingsMenusAndDependencies(t *testing.T) {
 	files, err := collect(fixture(t), "", "none")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if license, ok := files[app+"LICENSE"]; !ok || string(license.data) != "application MIT license" {
+		t.Fatal("application license missing from installer")
 	}
 	existing := map[string]string{
 		app + "settings.json": "saved settings", app + "port.txt": "80",

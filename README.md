@@ -91,3 +91,7 @@ and remain installed.
 
 Forks and pull requests are welcome. I would also appreciate testing on other Kobo
 readers. Please include the model, firmware version, and what worked or failed.
+
+## License
+
+[MIT](LICENSE). Bundled third-party components retain their own licenses and notices.
