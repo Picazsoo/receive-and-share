@@ -65,8 +65,14 @@ beginning. Transfers use local HTTP without encryption.
 | Kobo | Phone browser |
 | --- | --- |
 | <img src="docs/screenshots/kobo-connection-received.png" alt="Kobo connection screen" width="300"> | <img src="docs/screenshots/mobile-upload-progress.jpg" alt="Upload progress in a phone-sized browser" width="240"> |
+| Books to share | Browse and download |
+| <img src="docs/screenshots/kobo-sharing.png" alt="Select which books to share on the Kobo" width="300"> | <img src="docs/screenshots/mobile-selected.jpg" alt="Selected books ready for bulk download" width="240"> |
 
-[All screenshots, including desktop views](docs/screenshots/README.md).
+**Desktop file browser**
+
+<img src="docs/screenshots/desktop-files.jpg" alt="Desktop browser showing book folders and download controls" width="800">
+
+[More screenshots](docs/screenshots/README.md), including all Kobo, desktop and mobile views.
 Phone screenshots use a narrow desktop browser viewport, not a physical phone.
 
 ## Build
