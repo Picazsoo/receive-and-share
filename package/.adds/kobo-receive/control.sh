@@ -43,9 +43,12 @@ check_local() {
 case "$1" in
     open)
         exec > "$APP/open.log" 2>&1 < /dev/null
-        /usr/bin/qndb -m mwcToast 2500 'Starting Receive & Share...'
+        /usr/bin/qndb -m mwcToast 15000 'Starting Receive & Share...
+Waiting for Wi-Fi to turn on and connect. This may take a while.
+If it does not start, turn Wi-Fi on manually, connect to a network, then launch Receive & Share again.'
         if ! /bin/sh "$APP/control.sh" start; then
-            /usr/bin/qndb -m mwcToast 6000 'Receive & Share could not start. Check Wi-Fi and retry.'
+            /usr/bin/qndb -m mwcToast 15000 'Receive & Share could not start.
+Turn Wi-Fi on manually, connect to a network, then launch Receive & Share again.'
             exit 1
         fi
         # Native browser startup itself requests Wi-Fi. Wait for the temporary
@@ -63,7 +66,8 @@ case "$1" in
             fi
             sleep 1
         done
-        /usr/bin/qndb -m mwcToast 6000 'Wi-Fi is still connecting. Try Receive & Share again.'
+        /usr/bin/qndb -m mwcToast 15000 'Wi-Fi is still connecting.
+Turn Wi-Fi on manually, connect to a network, then launch Receive & Share again.'
         exit 1
         ;;
     start)

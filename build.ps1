@@ -20,6 +20,8 @@ try {
     $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
     & $Go test ./...
     if ($LASTEXITCODE) { throw 'Tests failed' }
+    & node client-session.test.mjs
+    if ($LASTEXITCODE) { throw 'Client session tests failed' }
     & $Go vet ./...
     if ($LASTEXITCODE) { throw 'Vet failed' }
     & $Go build -o ../dist/kobo-receive-host.exe .

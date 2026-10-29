@@ -121,6 +121,16 @@ func address(host string, port int) string {
 	}
 	return fmt.Sprintf("http://%s:%d/", host, port)
 }
+
+// Hostnames retain the full configured name. The separate DNS-SD instance
+// label reserves eight bytes for the responder's conflict suffixes.
+func serviceInstanceName(name string) string {
+	instance := "Receive & Share " + name
+	if len(instance) > 55 {
+		instance = instance[:55]
+	}
+	return instance
+}
 func (s *receiver) setNetwork(ip, host, status string, port int) {
 	s.netMu.Lock()
 	defer s.netMu.Unlock()
@@ -183,12 +193,8 @@ func (s *receiver) advertise(ctx context.Context, port int, ready chan struct{})
 			lastIP = ip
 			lastTry = time.Now()
 			s.setNetwork(ip, "", "Checking the local network name…", port)
-			probeCtx, doneProbe := context.WithTimeout(ctx, 8*time.Second)
-			service, e := dnssd.NewService(dnssd.Config{Name: "Receive & Share " + name, Host: name, Type: "_http._tcp", Port: port, Ifaces: []string{"wlan0"}, IPs: []net.IP{net.ParseIP(ip)}, Text: map[string]string{"path": "/"}})
-			if e == nil {
-				service, e = dnssd.ProbeService(probeCtx, service)
-			}
-			doneProbe()
+			identity := secret()
+			service, e := dnssd.NewService(dnssd.Config{Name: serviceInstanceName(name), Host: name, Type: "_http._tcp", Port: port, Ifaces: []string{"wlan0"}, IPs: []net.IP{net.ParseIP(ip)}, Text: map[string]string{"path": "/", "receiver-id": identity}})
 			if e != nil {
 				s.setNetwork(ip, "", "Local name unavailable; use the numeric address.", port)
 				log.Printf("mDNS unavailable: %v", e)
@@ -202,25 +208,29 @@ func (s *receiver) advertise(ctx context.Context, port int, ready chan struct{})
 					log.Printf("mDNS startup: %v", e)
 				} else {
 					var runCtx context.Context
-					runCtx, cancel = context.WithCancel(ctx)
+					var stopRun context.CancelFunc
+					runCtx, stopRun = context.WithCancel(ctx)
+					cancel = stopRun
 					stopped = make(chan struct{})
 					finished := stopped
 					go func() {
 						defer close(finished)
+						observed := make(chan struct{})
+						go func() { defer close(observed); s.observeAdvertisement(runCtx, ip, port, identity) }()
 						if e := responder.Respond(runCtx); e != nil && runCtx.Err() == nil {
 							log.Printf("mDNS responder: %v", e)
 						}
+						stopRun()
+						<-observed
 					}()
-					host := strings.TrimSuffix(service.Hostname(), ".")
-					s.setNetwork(ip, host, "Local name advertised. Use the numeric address if your browser cannot resolve it.", port)
-					log.Printf("Local address: %s", address(host, port))
 				}
 			}
 		}
 		if stopped != nil && cancel != nil {
 			select {
 			case <-stopped:
-				cancel = nil
+				stop()
+				s.setNetwork(lastIP, "", "Local name unavailable; use the numeric address.", port)
 			default:
 			}
 		}

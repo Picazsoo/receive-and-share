@@ -100,6 +100,13 @@ advertising to restart without clearing the running session. Open the phone page
 using the .local address for reconnection across IP changes; an already-loaded
 numeric-IP page cannot follow a different address automatically.
 
+Discovery follows the app's own network announcements through the pinned mDNS
+library's public browsing API. It checks a per-run discovery identifier, interface,
+IP and port, and refreshes the QR address and accepted hostname after conflict
+renames. Fresh browse windows also detect a hostname-only rename. The separate
+DNS-SD service-instance label is shortened to leave room for conflict suffixes;
+the configured hostname keeps its full name. No dependency patch is required.
+
 On the source Kobo, **What to share** selects **Share all** or specific books.
 **Remember Share all for next time** persists that choice. Specific selections
 last for the current session, including selections saved across sharing pages.
@@ -149,6 +156,12 @@ interval. Successful pairing creates a random, HttpOnly browser-session cookie;
 form submissions also require a CSRF token. All paired access ends when the receiver
 stops. Hidden/system folders and symlinks are excluded, and file access is confined
 to the configured storage root. There are no remote delete or rename operations.
+Downloads also require the exact visible directory-entry path, rejecting FAT/Windows
+short-name aliases that could otherwise reach hidden books. Request deadlines cover
+Host rejection, and shutdown bounds the draining of non-transfer requests after
+active transfers complete. Finish can wait for progressing transfers beyond the
+normal page deadline. Re-pairing cancels old uploads and invalidates their callbacks
+so an interrupted file requires an explicit retry in the new session.
 Transfers use HTTP on your local network (not encryption). The QR/code screen and
 Finish & refresh library route are accessible only through loopback on the source Kobo.
 

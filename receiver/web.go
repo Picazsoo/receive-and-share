@@ -62,16 +62,20 @@ func foreign(r *http.Request) bool {
 	return (o != "" && o != "null" && o != "http://"+r.Host) || r.Header.Get("Sec-Fetch-Site") == "cross-site"
 }
 func (s *receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+	extendDeadlines(rc, requestTimeout)
 	// Reject DNS rebinding: only the printed address and Kobo loopback are served.
 	s.netMu.RLock()
 	hostOK := s.allowedHosts == nil || s.allowedHosts[r.Host]
 	s.netMu.RUnlock()
 	if !hostOK {
+		// Do not drain a body supplied by a rejected, unauthenticated peer.
+		rc.SetReadDeadline(time.Now())
+		w.Header().Set("Connection", "close")
 		log.Printf("Rejected Host: %q (local=%t, path=%s)", r.Host, local(r), r.URL.Path)
 		http.Error(w, "Use the address printed on the Kobo", 403)
 		return
 	}
-	rc := http.NewResponseController(w)
 	if p := r.URL.Path; p == "/api/upload" || p == "/upload" || p == "/download" || p == "/zip" {
 		r.Body = stallReader{r.Body, rc}
 		w = stallWriter{w, rc}
@@ -416,6 +420,31 @@ func (s *receiver) openBook(p string) (*os.File, error) {
 	}
 	parts := strings.Split(p, "/")
 	for i := range parts {
+		// FAT and Windows can resolve 8.3 aliases for hidden directories/files.
+		// Require the exact directory-entry spelling used by our visible listing.
+		parent := "."
+		if i > 0 {
+			parent = strings.Join(parts[:i], "/")
+		}
+		dir, err := s.root.Open(parent)
+		if err != nil {
+			return nil, err
+		}
+		entries, err := dir.Readdirnames(-1)
+		dir.Close()
+		if err != nil {
+			return nil, err
+		}
+		found := false
+		for _, entry := range entries {
+			if entry == parts[i] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("not an enumerated book path")
+		}
 		info, e := s.root.Lstat(strings.Join(parts[:i+1], "/"))
 		if e != nil {
 			return nil, e

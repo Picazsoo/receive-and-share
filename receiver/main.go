@@ -104,11 +104,17 @@ func (s *receiver) finish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "This receiving session has changed. Open Receive & Share again.", 403)
 		return
 	}
+	// A legitimate, progressing transfer can outlive the normal page deadline.
+	// Authentication and form parsing above remain deadline-bound.
+	rc := http.NewResponseController(w)
+	rc.SetWriteDeadline(time.Time{})
 	if err := s.finishTransfers(); err != nil {
+		rc.SetWriteDeadline(time.Now().Add(requestTimeout))
 		log.Printf("Library refresh unavailable: %v", err)
 		render(w, pageHead+`<h1>Import helper unavailable</h1><p>The library refresh could not start. The session remains active. Go back and try Finish &amp; refresh library again.</p><p>{{.}}</p></body></html>`, err.Error())
 		return
 	}
+	rc.SetWriteDeadline(time.Now().Add(requestTimeout))
 	w.Header().Set("Connection", "close")
 	count, total, files := s.receivedSnapshot(0)
 	render(w, finishedPage, struct {
@@ -578,8 +584,30 @@ func run() error {
 		}
 	}
 	// Stop accepting uploads, then let in-flight file writes finish before exit/import.
-	if err = server.Shutdown(context.Background()); err != nil {
-		log.Print(err)
-	}
+	shutdownReceiver(server, s)
 	return nil
+}
+
+// Close listeners immediately, preserve active transfers, then bound the time
+// spent draining other requests so unauthenticated peers cannot prevent cleanup.
+func shutdownReceiver(server *http.Server, s *receiver) {
+	s.mu.Lock()
+	s.finishing = true
+	s.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.Shutdown(ctx) }()
+	s.uploads.Wait()
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Printf("HTTP shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		log.Print("Closing remaining HTTP connections after transfer completion")
+		cancel()
+		server.Close()
+		<-done
+	}
 }

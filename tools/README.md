@@ -17,6 +17,12 @@ These scripts run on the Kobo through an already secured SSH connection.
 
 SSH installation and credentials are intentionally separate from the receiver.
 
+`security-device.mjs` uses the same pinned SSH state to check that a rejected Host
+with an incomplete body closes promptly, and that a newly created disposable hidden
+PDF cannot be listed, downloaded, reviewed or zipped through the real FAT `ADDS~1`
+alias. It requires Share all to be enabled already, leaves sharing settings alone,
+and removes only its unique test file. It never reads existing hidden book contents.
+
 `smoke-device.mjs` runs from the computer with Node.js and the existing pinned SSH
 client state (`node tools/smoke-device.mjs ../.local-ssh`). It pairs over real Wi-Fi,
 uploads two uniquely named disposable PDFs, checks both download routes and ZIP

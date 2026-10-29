@@ -37,7 +37,7 @@ try {
  // Read ZIP central-directory entries, then verify STORE payloads byte-for-byte.
  const end=zip.lastIndexOf(Buffer.from([0x50,0x4b,0x05,0x06]));assert.ok(end>=0);assert.equal(zip.readUInt16LE(end+10),2);let at=zip.readUInt32LE(end+16);
  for(let i=0;i<2;i++){assert.equal(zip.readUInt32LE(at),0x02014b50);assert.equal(zip.readUInt16LE(at+10),0);const length=zip.readUInt32LE(at+20),nameLength=zip.readUInt16LE(at+28),extra=zip.readUInt16LE(at+30),comment=zip.readUInt16LE(at+32),offset=zip.readUInt32LE(at+42);assert.equal(zip.subarray(at+46,at+46+nameLength).toString(),selected[i].path);const start=offset+30+zip.readUInt16LE(offset+26)+zip.readUInt16LE(offset+28);assert.deepEqual(zip.subarray(start,start+length),bytes);at+=46+nameLength+extra+comment;}
- const basic=await(await fetch(base+'basic',{headers:{Cookie}})).text();assert.ok(!basic.includes('<script'));assert.ok(basic.includes(names[0]));
+ const basic=await(await fetch(base+'basic',{headers:{Cookie}})).text();assert.ok(!basic.includes('<script'));assert.ok(basic.includes(names[0].replaceAll('&','&amp;')));
  console.log(`PASS on Kobo: native ARM server, pairing, basic/modern uploads, listing (${listing.length} books), downloads, ZIP contents, and native-browser form headers.`);
 } finally {
  setSharing(originalMode,originalRemember,[]);
