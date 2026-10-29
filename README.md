@@ -6,7 +6,41 @@ Pair in your phone's browser to send multiple books, browse book folders, or dow
 books individually or as a ZIP. No account, cloud service, hotspot,
 Python installation, or kernel change is needed.
 
-<img src="docs/images/kobo-screen.png" alt="Receive & Share showing its QR code and Finish &amp; refresh library button on a Kobo Libra 2" width="420">
+## Screenshots
+
+The source Kobo shows the connection details and received books; the paired client
+queues files and shows progress for each upload.
+
+| Source Kobo | Phone client |
+| --- | --- |
+| <a href="docs/screenshots/kobo-connection-received.png"><img src="docs/screenshots/kobo-connection-received.png" alt="Kobo connection screen with QR code, pairing code, sharing settings and a received-file receipt" width="360"></a> | <a href="docs/screenshots/mobile-upload-progress.jpg"><img src="docs/screenshots/mobile-upload-progress.jpg" alt="Phone client uploading a sample PDF with its progress bar and Cancel button" width="280"></a> |
+
+The file browser supports individual downloads and a selection across folders.
+The selection summary sits above the full list of filenames, paths, types and sizes.
+
+[<img src="docs/screenshots/desktop-selected.jpg" alt="Desktop file browser with three selected books and a detailed bulk-download summary" width="900">](docs/screenshots/desktop-selected.jpg)
+
+<details>
+<summary>Sharing controls on the Kobo</summary>
+
+Choose which books the other device can download, or remember **Share all** for
+future sessions. The received-files screen records uploads from the current session.
+
+| Books to share | Received this session |
+| --- | --- |
+| <a href="docs/screenshots/kobo-sharing.png"><img src="docs/screenshots/kobo-sharing.png" alt="Kobo sharing settings with Share all, selected books and Remember Share all controls" width="360"></a> | <a href="docs/screenshots/kobo-session-files.png"><img src="docs/screenshots/kobo-session-files.png" alt="Kobo session history showing a disposable test PDF, its path, size and receipt time" width="360"></a> |
+
+</details>
+
+See the [complete screenshot index](docs/screenshots/README.md) for all 27 images,
+including pairing, upload queues, file details, the basic client, connection loss
+and the finished-session screen. An [HTML gallery](docs/screenshots/index.html)
+is also available for viewing locally.
+
+Captured on 29 October 2026. Kobo images are actual Libra 2 framebuffer captures.
+Client images use disposable sample books at desktop and phone-sized browser
+viewports; the phone images are not physical Android/iOS captures. The finished
+screen is a sample render of the production template with dummy receipts.
 
 ## Install
 
@@ -66,7 +100,7 @@ advertising to restart without clearing the running session. Open the phone page
 using the .local address for reconnection across IP changes; an already-loaded
 numeric-IP page cannot follow a different address automatically.
 
-On the source Kobo, **Choose books** selects **Share all** or specific books.
+On the source Kobo, **What to share** selects **Share all** or specific books.
 **Remember Share all for next time** persists that choice. Specific selections
 last for the current session, including selections saved across sharing pages.
 The default shares no books: paired devices can upload, but see no downloads until
@@ -200,8 +234,4 @@ that port. A running session keeps its port until it stops.
 Port 80 removes the port suffix from addresses. Port 8080 permits use without
 privileged-port permission on ordinary Linux hosts; it adds no encryption or
 authentication. Leave `port.txt` absent to retain the default.
-
-### Interface screenshots
-
-See [the screenshot gallery](docs/screenshots/index.html) for real Kobo screens and desktop/mobile client captures with sample books. Capture details and limitations are recorded in [the gallery notes](docs/screenshots/README.md).
 
