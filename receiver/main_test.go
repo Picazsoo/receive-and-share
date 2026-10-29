@@ -245,3 +245,98 @@ func TestLibraryScanBeforeServerShutdown(t *testing.T) {
 	default:
 	}
 }
+
+func TestConcurrentFinishWaitsForResult(t *testing.T) {
+	s := fixture(t)
+	release := make(chan struct{})
+	calls := 0
+	s.onFinish = func() error {
+		calls++
+		<-release
+		return fmt.Errorf("helper missing")
+	}
+	first := make(chan error, 1)
+	go func() { first <- s.finishTransfers() }()
+	for {
+		s.mu.Lock()
+		started := s.finishing
+		s.mu.Unlock()
+		if started {
+			break
+		}
+	}
+	second := make(chan error, 1)
+	go func() { second <- s.finishTransfers() }()
+	close(release)
+	if e := <-first; e == nil {
+		t.Fatal("first finish hid the helper failure")
+	}
+	if e := <-second; e == nil {
+		t.Fatal("concurrent finish reported success although the scan failed")
+	}
+	if calls != 2 {
+		t.Fatalf("library scan attempted %d times, want 2", calls)
+	}
+	s.onFinish = func() error { return nil }
+	if s.finishTransfers() != nil || s.finishTransfers() != nil {
+		t.Fatal("finish after success should report success")
+	}
+}
+
+func basicUpload(t *testing.T, s *receiver, csrf string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if csrf != "" {
+		mw.WriteField("csrf", csrf)
+	}
+	part, _ := mw.CreateFormFile("book", "basic.pdf")
+	part.Write([]byte("%PDF-1.7\nbasic"))
+	mw.Close()
+	r := httptest.NewRequest("POST", "http://kobo/upload", &body)
+	r.RemoteAddr = "192.168.1.3:1234"
+	r.Header.Set("Content-Type", mw.FormDataContentType())
+	r.Header.Set("Cookie", "kobo_session=test-cookie")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	return w
+}
+
+func TestBasicUploadTokenInForm(t *testing.T) {
+	s := fixture(t)
+	for _, csrf := range []string{"", "wrong"} {
+		if w := basicUpload(t, s, csrf); w.Code != 403 {
+			t.Fatalf("csrf %q: %d %s", csrf, w.Code, w.Body)
+		}
+	}
+	if w := basicUpload(t, s, "test-csrf"); w.Code != 200 {
+		t.Fatalf("%d: %s", w.Code, w.Body)
+	}
+	if _, e := os.Stat(filepath.Join(s.dest, "basic.pdf")); e != nil {
+		t.Fatal(e)
+	}
+}
+
+func TestSaveLeavesNoStagedFiles(t *testing.T) {
+	s := fixture(t)
+	if w := post(t, s, "staged.pdf", []byte("%PDF-1.7\nstaged")); w.Code != 200 {
+		t.Fatalf("%d: %s", w.Code, w.Body)
+	}
+	entries, _ := os.ReadDir(s.dest)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".receiving-") {
+			t.Fatal("staged upload leaked:", e.Name())
+		}
+	}
+	// A name reserved by an in-progress save is empty and must not be listed.
+	os.WriteFile(filepath.Join(s.dest, "reserved.pdf"), nil, 0644)
+	files, e := s.allBooks(httptest.NewRequest("GET", "/", nil))
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f.Path, "reserved.pdf") {
+			t.Fatal("empty reserved file listed")
+		}
+	}
+}

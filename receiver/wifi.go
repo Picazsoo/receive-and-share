@@ -138,19 +138,27 @@ func (l *wifiLease) release() error {
 	l.restore = false
 	return nil
 }
-func (s *receiver) holdWiFi() func() {
+
+// holdWiFi returns the restore function and a channel closed once any Wi-Fi
+// reconnect started here has finished.
+func (s *receiver) holdWiFi() (func(), <-chan struct{}) {
+	settled := make(chan struct{})
 	marker := filepath.Join(filepath.Dir(s.settingsPath), "wifi-restore.json")
 	lease, e := acquireWiFi("/mnt/onboard/.kobo/Kobo/Kobo eReader.conf", marker, wifiCall)
 	if e != nil {
 		log.Printf("Could not retain Wi-Fi: %v", e)
 	}
 	if lease == nil {
-		return func() {}
+		close(settled)
+		return func() {}, settled
 	}
-	if e == nil && lease.restore {
+	if e != nil || !lease.restore {
+		close(settled)
+	} else {
 		// Keep startup and the local browser responsive during the Wi-Fi reconnect.
 		lease.mu.Lock()
 		go func() {
+			defer close(settled)
 			defer lease.mu.Unlock()
 			if e := lease.cycle(); e != nil {
 				log.Printf("Wi-Fi reconnect: %v", e)
@@ -165,5 +173,5 @@ func (s *receiver) holdWiFi() func() {
 		} else {
 			log.Print("Previous Wi-Fi power-saving preference restored")
 		}
-	}
+	}, settled
 }

@@ -71,6 +71,14 @@ func (s *receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Use the address printed on the Kobo", 403)
 		return
 	}
+	rc := http.NewResponseController(w)
+	if p := r.URL.Path; p == "/api/upload" || p == "/upload" || p == "/download" || p == "/zip" {
+		r.Body = stallReader{r.Body, rc}
+		w = stallWriter{w, rc}
+		extendDeadlines(rc, transferStall)
+	} else {
+		extendDeadlines(rc, requestTimeout)
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
@@ -190,10 +198,8 @@ func (s *receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			token = r.PostForm.Get("csrf")
 		}
-		if r.URL.Path == "/upload" {
-			token = r.URL.Query().Get("csrf")
-		}
-		if !equal(token, csrf) {
+		// The basic /upload form carries its token as a multipart field, checked in upload.
+		if r.URL.Path != "/upload" && !equal(token, csrf) {
 			http.Error(w, "Session changed. Reload this page before trying again.", 403)
 			return
 		}
@@ -232,6 +238,42 @@ func (s *receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}
 }
+
+const (
+	requestTimeout = 5 * time.Minute
+	// Large transfers on slow Wi-Fi may take longer than requestTimeout; they
+	// only need to make progress within transferStall.
+	transferStall = 2 * time.Minute
+)
+
+func extendDeadlines(rc *http.ResponseController, d time.Duration) {
+	// Unsupported writers, such as test recorders, simply have no deadline.
+	until := time.Now().Add(d)
+	rc.SetReadDeadline(until)
+	rc.SetWriteDeadline(until)
+}
+
+type stallReader struct {
+	io.ReadCloser
+	rc *http.ResponseController
+}
+
+func (r stallReader) Read(p []byte) (int, error) {
+	extendDeadlines(r.rc, transferStall)
+	return r.ReadCloser.Read(p)
+}
+
+type stallWriter struct {
+	http.ResponseWriter
+	rc *http.ResponseController
+}
+
+func (w stallWriter) Write(p []byte) (int, error) {
+	extendDeadlines(w.rc, transferStall)
+	return w.ResponseWriter.Write(p)
+}
+func (w stallWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (s *receiver) asset(w http.ResponseWriter, r *http.Request, name string) {
 	b, err := assets.ReadFile("web/" + name)
 	if err != nil {
@@ -398,9 +440,7 @@ func (s *receiver) allBooks(r *http.Request) ([]book, error) {
 	if s.root == nil {
 		return result, fmt.Errorf("storage unavailable")
 	}
-	// The save lock prevents exposing partially copied final files.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// No lock is needed: uploads are staged under hidden names and renamed into place.
 	visited := 0
 	err := fs.WalkDir(s.root.FS(), ".", func(p string, d fs.DirEntry, e error) error {
 		if r.Context().Err() != nil {
@@ -432,7 +472,8 @@ func (s *receiver) allBooks(r *http.Request) ([]book, error) {
 		if e != nil {
 			return e
 		}
-		if !info.Mode().IsRegular() {
+		// Empty files include names reserved by a save that is still renaming.
+		if !info.Mode().IsRegular() || info.Size() == 0 {
 			return nil
 		}
 		folder := path.Dir(p)
@@ -623,12 +664,12 @@ func (s *receiver) basic(w http.ResponseWriter, r *http.Request, csrf string) {
 		next = pageURL(page + 1)
 	}
 	render(w, basicPage, struct {
-		Files                       []book
-		Folders                     []string
-		CSRF, Folder, Query, Upload string
-		Previous, Next              string
-		Total                       int
-	}{shown, names, csrf, folder, r.URL.Query().Get("q"), "/upload?csrf=" + csrf, previous, next, total})
+		Files               []book
+		Folders             []string
+		CSRF, Folder, Query string
+		Previous, Next      string
+		Total               int
+	}{shown, names, csrf, folder, r.URL.Query().Get("q"), previous, next, total})
 }
 func urlValues(folder, query string, page int) string {
 	return "folder=" + url.QueryEscape(folder) + "&q=" + url.QueryEscape(query) + "&page=" + strconv.Itoa(page)
@@ -644,5 +685,5 @@ const pairPage = simpleHead + `<h2>Pair with this Kobo</h2><p>Use the same Wi-Fi
 const sourcePage = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Receive & Share</title><style>
 html,body{height:100%;margin:0;padding:0;background:white;color:black}body{display:table;width:100%;font:17px/1.35 sans-serif}.screen{display:table-cell;vertical-align:middle;padding:18px 24px;text-align:center;box-sizing:border-box}.panel{max-width:640px;margin:0 auto}h1{font-size:26px;line-height:1.2;margin:0 0 6px}.intro{font-size:16px;margin:0 0 10px}.qr-switch{display:table;border-collapse:collapse;table-layout:fixed;width:100%;max-width:420px;margin:8px auto 10px}.qr-switch a,.qr-switch span{display:table-cell;vertical-align:middle;width:50%;height:30px;padding:7px 12px;border:2px solid black;font:18px/1.3 sans-serif;text-decoration:none;color:black;background:white}.qr-switch .active{background:black;color:white;font-weight:bold}.qr-switch .unavailable{color:#777;background:#eee}.qr{display:block;width:200px;height:200px;max-width:80%;margin:0 auto 4px}.address{font-size:16px;margin:0 0 8px;word-wrap:break-word}.address small{font-size:13px}.pairing{margin:0}.pin-caption{font-size:15px;vertical-align:middle}.code{display:inline-block;font-size:38px;font-weight:bold;line-height:1.2;letter-spacing:4px;margin-left:12px;vertical-align:middle}.pairing .new-code{margin:0 0 0 16px;font-size:18px;padding:9px 14px}.status{font-size:13px;margin:5px 0 10px}.settings-area{border-top:1px solid #aaa;padding-top:10px;margin-top:10px}h2{font-size:18px;margin:0 0 8px}.settings-actions{display:table;width:100%;table-layout:fixed;border-spacing:8px 0}.settings-actions .tool-button{display:table-cell;width:50%;font-weight:bold}.sharing-summary{font-size:14px;margin:6px 0 10px}.session-area{border-top:1px solid #aaa;padding-top:10px;text-align:left}.session-heading h2{display:inline-block;margin:0 12px 0 0;vertical-align:middle}.session-heading .tool-button{font-size:16px;padding:9px 14px}.session-summary{font-size:14px;margin:7px 0}.session-file{border-top:1px solid #bbb;padding:7px 0;word-wrap:break-word}.session-file strong{font-size:16px}.session-type{display:inline-block;border:1px solid #777;padding:1px 4px;margin-right:7px;font-size:11px;vertical-align:middle}.session-meta{font-size:13px;margin-top:3px;color:#333}.session-empty{font-size:14px;margin:8px 0 10px}.all-received{display:block;margin:8px 0;text-align:center}.finish-form{margin:0}.finish{width:100%;min-height:50px;margin:10px 0 0;padding:12px 18px;background:black;color:white;font-size:19px;font-weight:bold}.help{font-size:13px;margin:9px 0 0}#browser-lease-status{font-size:12px!important;margin:4px 0 0}form{margin:0}
 ` + formControlsCSS + `</style></head><body><main class="screen"><div class="panel"><input type="hidden" id="source-address" value="{{.Canonical}}"><h1>Receive & Share</h1><p class="intro">Scan or enter the address on the other device.</p><div class="qr-switch" role="group" aria-label="QR address type">{{if .HasLocal}}{{if .UseIP}}<a href="/screen?address=local">Local name</a><span class="active" aria-current="true">IP address</span>{{else}}<span class="active" aria-current="true">Local name</span><a href="/screen?address=ip">IP address</a>{{end}}{{else}}<span class="unavailable">Local name</span><span class="active">IP address</span>{{end}}</div><img class="qr" src="{{.QRSource}}" width="200" height="200" alt="Connection address QR code"><p class="address">{{.URL}}{{if ne .URL .Fallback}}<br><small>{{.FallbackLabel}}: {{.Fallback}}</small>{{end}}</p><form class="pairing" action="/renew" method="post"><input type="hidden" name="token" value="{{.Token}}"><span class="pin-caption">Pairing code</span><strong class="code">{{.PIN}}</strong><button class="new-code">New code</button></form><p class="status">{{.Status}}</p><section class="settings-area"><h2>Settings</h2><div class="settings-actions"><a class="tool-button" href="/share-settings">What to share</a><a class="tool-button" href="/settings">Device name</a></div><p class="sharing-summary" id="source-sharing">Sharing: {{.Sharing}}</p></section><section class="session-area"><div class="session-heading"><h2>Received this session</h2><a class="tool-button" href="/screen">Refresh</a></div><p id="received-summary" class="session-summary">{{.Count}} file{{if ne .Count 1}}s{{end}} received · {{size .Total}}</p><div id="session-files" data-revision="{{.Count}}">{{range .Recent}}<div class="session-file"><span class="session-type">{{.Type}}</span><strong>{{display .Name}}</strong><div class="session-meta">Received · {{.SizeLabel}} · {{.Time}}</div></div>{{else}}<p class="session-empty">Waiting for files. This list updates automatically.</p>{{end}}</div><a id="all-received" class="tool-button all-received" href="/session-files" {{if le .Count 3}}hidden style="display:none"{{end}}>View all received files</a></section><form class="finish-form" action="/finish" method="post"><input type="hidden" name="token" value="{{.Token}}"><button class="finish">Finish &amp; refresh library</button></form><p class="help">Keep this Kobo awake · EPUB / PDF · 100 MiB per file · 20-minute session</p></div></main></body></html>`
-const basicPage = simpleHead + `<p>Basic view · <a href="/">Enhanced view</a> · <a href="/basic">All books / refresh</a></p><h2>Send a book</h2><form action="{{.Upload}}" method="post" enctype="multipart/form-data"><input name="book" type="file" accept=".epub,.pdf" required><button>Send to Kobo</button></form><p><small>100 MiB maximum. To transfer between Kobos, browse and download from the receiving Kobo.</small></p><h2>Files on Kobo</h2><form action="/basic" method="get"><label>Folder <select name="folder"><option value="">All book folders</option>{{range .Folders}}<option value="{{.}}" {{if eq . $.Folder}}selected{{end}}>{{.}}</option>{{end}}</select></label><br><label>Search <input name="q" value="{{display .Query}}"></label><button>Show files</button></form><form action="/review" method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><p>{{.Total}} books found. Showing {{len .Files}} on this page. Select up to 100 books (512 MiB) for a ZIP. Selection applies to this page.</p>{{if .Previous}}<a href="{{.Previous}}">Previous page</a>{{end}} {{if .Next}}<a href="{{.Next}}">Next page</a>{{end}}<button>Review selected books</button><table><tr><th>Select / file</th><th>Type / size</th><th>Download</th></tr>{{range .Files}}<tr><td><label class="choice"><input type="checkbox" name="file" value="{{.Path}}"><span class="control-mark" aria-hidden="true"></span> {{.Name}}</label><div class="path">/{{display .Path}}</div></td><td>{{.Type}}<br>{{size .Size}}</td><td><a href="/download?file={{urlquery .Path}}">Download</a></td></tr>{{else}}<tr><td>No books found.</td></tr>{{end}}</table><button>Review selected books</button></form><p>System and hidden folders are excluded. Tap Finish &amp; refresh library on the source Kobo when done.</p></body></html>`
+const basicPage = simpleHead + `<p>Basic view · <a href="/">Enhanced view</a> · <a href="/basic">All books / refresh</a></p><h2>Send a book</h2><form action="/upload" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{.CSRF}}"><input name="book" type="file" accept=".epub,.pdf" required><button>Send to Kobo</button></form><p><small>100 MiB maximum. To transfer between Kobos, browse and download from the receiving Kobo.</small></p><h2>Files on Kobo</h2><form action="/basic" method="get"><label>Folder <select name="folder"><option value="">All book folders</option>{{range .Folders}}<option value="{{.}}" {{if eq . $.Folder}}selected{{end}}>{{.}}</option>{{end}}</select></label><br><label>Search <input name="q" value="{{display .Query}}"></label><button>Show files</button></form><form action="/review" method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><p>{{.Total}} books found. Showing {{len .Files}} on this page. Select up to 100 books (512 MiB) for a ZIP. Selection applies to this page.</p>{{if .Previous}}<a href="{{.Previous}}">Previous page</a>{{end}} {{if .Next}}<a href="{{.Next}}">Next page</a>{{end}}<button>Review selected books</button><table><tr><th>Select / file</th><th>Type / size</th><th>Download</th></tr>{{range .Files}}<tr><td><label class="choice"><input type="checkbox" name="file" value="{{.Path}}"><span class="control-mark" aria-hidden="true"></span> {{.Name}}</label><div class="path">/{{display .Path}}</div></td><td>{{.Type}}<br>{{size .Size}}</td><td><a href="/download?file={{urlquery .Path}}">Download</a></td></tr>{{else}}<tr><td>No books found.</td></tr>{{end}}</table><button>Review selected books</button></form><p>System and hidden folders are excluded. Tap Finish &amp; refresh library on the source Kobo when done.</p></body></html>`
 const reviewPage = simpleHead + `<h2>{{len .Files}} books selected</h2><p>Total: {{size .Total}} · one ZIP · folder paths preserved.</p><form action="/zip" method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><table><tr><th>Filename / path</th><th>Type / size</th></tr>{{range .Files}}<tr><td>{{.Name}}<div class="path">/{{.Path}}</div><input type="hidden" name="file" value="{{.Path}}"></td><td>{{.Type}}<br>{{size .Size}}</td></tr>{{end}}</table><button>Download ZIP</button></form><a href="/basic">Back to files</a></body></html>`

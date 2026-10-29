@@ -26,7 +26,7 @@ const previousSharing=ssh('wget -qO- http://127.0.0.1:8080/share-settings');
  const names=[`Receive & Share test ${randomBytes(6).toString('hex')}.pdf`,`Receive & Share test ${randomBytes(6).toString('hex')}.pdf`];
 const bytes=Buffer.from('%PDF-1.7\nReceive & Share disposable integration test\n%%EOF\n');
 try {
- for(let i=0;i<names.length;i++) {const data=new FormData();data.set('book',new Blob([bytes]),names[i]);const response=await fetch(base+(i===0?'api/upload':'upload?csrf='+session.csrf),{method:'POST',headers:{Cookie,'X-CSRF-Token':session.csrf,Origin:i===0?base.slice(0,-1):'http://www.kobo.com'},body:data});assert.equal(response.status,200,await response.text());}
+ for(let i=0;i<names.length;i++) {const data=new FormData();if(i>0)data.set('csrf',session.csrf);data.set('book',new Blob([bytes]),names[i]);const response=await fetch(base+(i===0?'api/upload':'upload'),{method:'POST',headers:{Cookie,'X-CSRF-Token':session.csrf,Origin:i===0?base.slice(0,-1):'http://www.kobo.com'},body:data});assert.equal(response.status,200,await response.text());}
  setSharing('selected',false,names);
  const listing=await(await fetch(base+'api/files',{headers:{Cookie}})).json();assert.ok(listing.every(f=>!f.path.split('/').some(p=>p.startsWith('.'))));
  const selected=names.map(n=>listing.find(f=>f.path==='Received Books/'+n));assert.ok(selected.every(Boolean));

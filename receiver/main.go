@@ -58,6 +58,8 @@ type receiver struct {
 	uploads                                                     sync.WaitGroup
 	count                                                       int
 	finishing                                                   bool
+	finishMu                                                    sync.Mutex
+	finished                                                    bool
 	onFinish                                                    func() error
 }
 
@@ -98,7 +100,7 @@ func (s *receiver) finish(w http.ResponseWriter, r *http.Request) {
 	// submits a local form. Authorize this local-only POST using the unguessable
 	// session token instead. Neither the screen nor its token is exposed remotely.
 	r.Body = http.MaxBytesReader(w, r.Body, 1024)
-	if r.ParseForm() != nil || r.PostForm.Get("token") != s.token {
+	if r.ParseForm() != nil || !equal(r.PostForm.Get("token"), s.token) {
 		http.Error(w, "This receiving session has changed. Open Receive & Share again.", 403)
 		return
 	}
@@ -115,12 +117,16 @@ func (s *receiver) finish(w http.ResponseWriter, r *http.Request) {
 		Files []receivedFile
 	}{count, total, files})
 }
+
+// finishTransfers serializes finish attempts: a concurrent caller waits for the
+// attempt in progress and reports success only once the library scan was requested.
 func (s *receiver) finishTransfers() error {
-	s.mu.Lock()
-	if s.finishing {
-		s.mu.Unlock()
+	s.finishMu.Lock()
+	defer s.finishMu.Unlock()
+	if s.finished {
 		return nil
 	}
+	s.mu.Lock()
 	s.finishing = true
 	s.mu.Unlock()
 	log.Print("Waiting for active transfers before library refresh")
@@ -135,6 +141,8 @@ func (s *receiver) finishTransfers() error {
 		s.mu.Lock()
 		s.finishing = false
 		s.mu.Unlock()
+	} else {
+		s.finished = true
 	}
 	return err
 }
@@ -214,6 +222,8 @@ func (s *receiver) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	var tempPath, name string
 	var uploadedSize int64
+	// The basic form sends its CSRF token as a field before the file, keeping it out of the URL.
+	formToken := r.URL.Path != "/upload"
 	defer func() {
 		if tempPath != "" {
 			os.Remove(tempPath)
@@ -228,9 +238,19 @@ func (s *receiver) upload(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Upload interrupted or too large. Limit: 100 MiB.", 400)
 			return
 		}
+		if part.FormName() == "csrf" && part.FileName() == "" {
+			b, _ := io.ReadAll(io.LimitReader(part, 128))
+			part.Close()
+			formToken = formToken || equal(string(b), s.session(r))
+			continue
+		}
 		if part.FormName() != "book" || part.FileName() == "" {
 			part.Close()
 			continue
+		}
+		if !formToken {
+			http.Error(w, "Session changed. Reload this page before trying again.", 403)
+			return
 		}
 		if tempPath != "" {
 			http.Error(w, "Upload one file at a time.", 400)
@@ -249,6 +269,9 @@ func (s *receiver) upload(w http.ResponseWriter, r *http.Request) {
 		tempPath = f.Name()
 		n, e := io.Copy(f, io.LimitReader(part, maxUpload+1))
 		uploadedSize = n
+		if e == nil {
+			e = f.Sync()
+		}
 		closeErr := f.Close()
 		if e != nil || closeErr != nil || n > maxUpload || n == 0 {
 			http.Error(w, "Upload failed or exceeded 100 MiB. Check storage and try again.", 400)
@@ -286,7 +309,13 @@ func (s *receiver) upload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *receiver) save(path, name string) (string, error) {
-	// O_EXCL prevents replacing existing books, including on the Kobo's FAT volume.
+	staged, err := s.stage(path)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(staged)
+	// O_EXCL reserves a name without replacing existing books, including on the
+	// Kobo's FAT volume; the complete staged file then replaces the empty placeholder.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stem, ext := strings.TrimSuffix(name, filepath.Ext(name)), filepath.Ext(name)
@@ -303,22 +332,8 @@ func (s *receiver) save(path, name string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		src, err := os.Open(path)
-		if err != nil {
-			f.Close()
-			os.Remove(dest)
-			return "", err
-		}
-		_, err = io.Copy(f, src)
-		src.Close()
-		if err == nil {
-			err = f.Sync()
-		}
-		closeErr := f.Close()
-		if err == nil {
-			err = closeErr
-		}
-		if err != nil {
+		f.Close()
+		if err = os.Rename(staged, dest); err != nil {
 			os.Remove(dest)
 			return "", err
 		}
@@ -327,9 +342,57 @@ func (s *receiver) save(path, name string) (string, error) {
 	return "", fmt.Errorf("too many duplicate names")
 }
 
+// stage moves an upload to a hidden file in the book directory, so listings never
+// expose partial books. It copies only when the temporary directory is on another volume.
+func (s *receiver) stage(path string) (string, error) {
+	f, err := os.CreateTemp(s.dest, ".receiving-*")
+	if err != nil {
+		return "", err
+	}
+	staged := f.Name()
+	f.Close()
+	if err = os.Rename(path, staged); err == nil {
+		return staged, nil
+	}
+	if f, err = os.OpenFile(staged, os.O_WRONLY|os.O_TRUNC, 0644); err != nil {
+		os.Remove(staged)
+		return "", err
+	}
+	src, err := os.Open(path)
+	if err == nil {
+		_, err = io.Copy(f, src)
+		src.Close()
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(staged)
+		return "", err
+	}
+	return staged, nil
+}
+
+// Pages are constant strings, so each is parsed once and reused.
+var pageTemplates sync.Map
+
 func render(w http.ResponseWriter, page string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := template.Must(template.New("page").Funcs(template.FuncMap{"display": displayText, "size": humanSize}).Parse(page)).Execute(w, data); err != nil {
+	t, ok := pageTemplates.Load(page)
+	if !ok {
+		parsed, err := template.New("page").Funcs(template.FuncMap{"display": displayText, "size": humanSize}).Parse(page)
+		if err != nil {
+			log.Print(err)
+			http.Error(w, "Page unavailable", 500)
+			return
+		}
+		t, _ = pageTemplates.LoadOrStore(page, parsed)
+	}
+	if err := t.(*template.Template).Execute(w, data); err != nil {
 		log.Print(err)
 	}
 }
@@ -364,6 +427,14 @@ func requestLibraryScan(command func(string) error, finished chan<- struct{}) er
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run returns errors instead of exiting, so deferred cleanup such as Wi-Fi
+// restoration always runs.
+func run() error {
 	rootDir := flag.String("root", "/mnt/onboard", "storage root for book browsing")
 	dest := flag.String("dest", "/mnt/onboard/Received Books", "book directory")
 	temp := flag.String("temp", "/mnt/onboard/.adds/kobo-receive/tmp", "temporary directory")
@@ -386,21 +457,21 @@ func main() {
 			*ip, err = wifiIP()
 		}
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
 	parsed := net.ParseIP(*ip)
 	if parsed == nil || parsed.To4() == nil {
-		log.Fatal("an IPv4 address is required")
+		return fmt.Errorf("an IPv4 address is required")
 	}
 	for _, d := range []string{*dest, *temp} {
 		if err = os.MkdirAll(d, 0755); err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
 	token := make([]byte, 16)
 	if _, err = rand.Read(token); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	s := &receiver{token: hex.EncodeToString(token), dest: *dest, temp: *temp}
 	s.instance = secret()
@@ -411,7 +482,7 @@ func main() {
 	s.settingsPath = *config
 	settings, err := loadSettings(*config)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	s.deviceName = settings.Name
 	s.shareAll = settings.ShareAll
@@ -420,7 +491,7 @@ func main() {
 	s.allowedHosts = map[string]bool{fmt.Sprintf("%s:%d", *ip, *port): true, fmt.Sprintf("127.0.0.1:%d", *port): true, *ip: true, "127.0.0.1": true}
 	s.root, err = os.OpenRoot(*rootDir)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer s.root.Close()
 	s.sessions = make(map[string]string)
@@ -433,16 +504,19 @@ func main() {
 	s.fallbackURL = s.url
 	s.qr, err = qrcode.Encode(s.url, qrcode.Medium, 420)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	listener, err := net.Listen("tcp4", fmt.Sprintf(":%d", *port))
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	server := &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 5 * time.Minute, WriteTimeout: 5 * time.Minute, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	server := &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	// Request timeouts are per request in ServeHTTP: transfers only need to keep making progress.
+	var wifiSettled <-chan struct{}
 	if *keepWiFi {
-		releaseWiFi := s.holdWiFi()
+		releaseWiFi, settled := s.holdWiFi()
 		defer releaseWiFi()
+		wifiSettled = settled
 	}
 	networkCtx, stopNetwork := context.WithCancel(context.Background())
 	var networkDone chan struct{}
@@ -470,9 +544,18 @@ func main() {
 	} else {
 		s.mdnsStatus = "Use the numeric address on this network."
 	}
+	if wifiSettled != nil {
+		// The launcher opens the browser once Wi-Fi looks stable; signal readiness
+		// only after the ForceWifiOn reconnect so that check sees the final link.
+		select {
+		case <-wifiSettled:
+		case <-time.After(20 * time.Second):
+			log.Print("Wi-Fi reconnect still running; continuing startup")
+		}
+	}
 	if *ready != "" {
 		if err = os.WriteFile(*ready, []byte("ready\n"), 0600); err != nil {
-			log.Fatal(err)
+			return err
 		}
 		defer os.Remove(*ready)
 	}
@@ -498,4 +581,5 @@ func main() {
 	if err = server.Shutdown(context.Background()); err != nil {
 		log.Print(err)
 	}
+	return nil
 }
