@@ -1,6 +1,6 @@
-# Receive & Share
+# Receive & Share for Kobo Libra 2
 
-I made this so my wife could put books on her Kobo without a USB cable.
+I made this so my wife could put books on her Kobo Libra 2 without a USB cable from either a phone or a computer.
 
 Send EPUB and PDF files from a phone or computer over local Wi-Fi, using a browser.
 You can also browse book folders and download individual books or a ZIP. A basic
