@@ -1,0 +1,19 @@
+/dist/
+/package/docs/
+/package/.adds/kobo-receive/licenses/
+/receiver/.gocache/
+/receiver/.gomodcache/
+/.toolchain/
+/package/README.md
+/package/.adds/kobo-receive/kobo-receive
+
+# Device backups, generated diagnostics, and credentials do not belong here.
+.kobo/
+.local-ssh/
+.ssh/
+*.log
+*.key
+*.pem
+id_ed25519*
+host_ed25519*
+authorized_keys

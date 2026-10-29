@@ -1,0 +1,83 @@
+(() => {
+ 'use strict';
+ const $=selector=>document.querySelector(selector);
+ const icon=name=>`<svg aria-hidden="true"><use href="#${name}"/></svg>`;
+ const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const mib=1024*1024;
+ const size=bytes=>bytes>=mib?`${(bytes/mib).toFixed(1)} MiB`:`${Math.max(1,Math.round(bytes/1024))} KiB`;
+ const type=name=>/\.pdf$/i.test(name)?'PDF':'EPUB';
+ let queue=[],library=[],selected=new Set(),view='upload',folder='',query='',sort='name',sequence=0,running=false,timer,toastTimer;
+ const sampleQueue=[{name:'The art of noticing.epub',size:1.8*mib},{name:'Field notes.pdf',size:4.2*mib,failOnce:true},{name:'A slower kind of Sunday.epub',size:840*1024}];
+ const sampleLibrary=[
+  {name:'A field guide to small things.epub',folder:'',size:2.3*mib,added:'24 Oct',date:24},
+  {name:'Collected essays.epub',folder:'',size:1.1*mib,added:'21 Oct',date:21},
+  {name:'Walking maps.pdf',folder:'',size:6.8*mib,added:'18 Oct',date:18},
+  {name:'Letters from elsewhere.epub',folder:'Received Books',size:1.6*mib,added:'26 Oct',date:26},
+  {name:'A quiet kind of adventure.epub',folder:'Received Books',size:920*1024,added:'25 Oct',date:25},
+  {name:'The small book of gardens.pdf',folder:'Reading list',size:3.4*mib,added:'22 Oct',date:22},
+  {name:'Notes from the coast.epub',folder:'Reading list',size:1.3*mib,added:'20 Oct',date:20},
+  {name:'A year outside.epub',folder:'Favourites',size:2.1*mib,added:'15 Oct',date:15}
+ ];
+ function reset(){clearInterval(timer);running=false;queue=sampleQueue.map(item=>({...item,id:`q${++sequence}`,progress:0,status:'queued',demo:true}));library=sampleLibrary.map(item=>({...item,id:`l${++sequence}`,demo:true}));selected.clear();folder='';query='';$('#file-search').value='';renderQueue();renderLibrary();}
+ function toast(message){clearTimeout(toastTimer);$('#toast').textContent=message;$('#toast').hidden=false;toastTimer=setTimeout(()=>$('#toast').hidden=true,4500);}
+ function tile(name){const t=type(name);return `<span class="file-tile ${t==='PDF'?'pdf':''}">${icon('file')}<span>${t}</span></span>`;}
+ function setView(next){view=next;$('#upload-view').hidden=view!=='upload';$('#files-view').hidden=view!=='files';$('#header-section').textContent=view==='upload'?'Send files':'Files on Kobo';document.querySelectorAll('[data-view]').forEach(button=>button.classList.toggle('active',button.dataset.view===view));if(view==='files')renderLibrary();}
+ function addFiles(files){let rejected=0;for(const file of files){if(!/\.(epub|pdf)$/i.test(file.name)||file.size===0||file.size>100*mib){rejected++;continue;}queue.push({id:`q${++sequence}`,name:file.name,size:file.size,file,progress:0,status:'queued',demo:false});}renderQueue();if(rejected)toast(`${rejected} file${rejected>1?'s':''} skipped. Choose EPUB/PDF files up to 100 MiB.`);}
+ function renderQueue(){
+  const queued=queue.filter(f=>f.status==='queued'),active=queue.find(f=>f.status==='sending'),complete=queue.filter(f=>f.status==='complete'),failed=queue.filter(f=>f.status==='failed');
+  $('#queue-count').textContent=queue.length;$('#queue-badge').textContent=queued.length+(active?1:0);$('#queue-badge').hidden=!(queued.length||active);
+  $('#queue-summary').textContent=active?`Sending ${active.name}`:complete.length===queue.length&&queue.length?`${complete.length} received · ready to import`:`${queued.length} ready · ${size(queue.reduce((sum,f)=>sum+f.size,0))} total`;
+  $('#send-all').disabled=running||!(queued.length||failed.length);$('#send-all span').textContent=running?'Sending…':queued.length?`Send ${queued.length} file${queued.length===1?'':'s'}`:failed.length?'Retry interrupted':complete.length?'All received':'Choose files';
+  $('#clear-completed').disabled=!complete.length;
+  $('#transfer-summary').textContent=failed.length?`${failed.length} interrupted · retry when ready`:complete.length?`${complete.length} of ${queue.length} received`:'Files are sent one at a time.';
+  $('#queue-list').innerHTML=queue.length?queue.map(file=>{
+   const sub=file.status==='sending'?`<span class="sending">Sending… ${Math.round(file.progress)}%</span>`:file.status==='complete'?'<span class="good">Received on Kobo</span>':file.status==='failed'?'<span class="bad">Connection interrupted</span>':file.status==='cancelled'?'<span>Cancelled</span>':'<span>Ready to send</span>';
+   const status=file.status==='complete'?icon('check'):file.status==='sending'?`${Math.round(file.progress)}%`:file.status==='queued'?'Waiting':'';
+   return `<div class="queue-row ${file.status}" data-id="${file.id}">${tile(file.name)}<div class="file-main"><div class="file-name" title="${escape(file.name)}">${escape(file.name)}</div><div class="file-sub"><span>${size(file.size)}</span><span>·</span>${sub}</div>${file.status==='sending'||file.status==='failed'?`<div class="progress-track" role="progressbar" aria-label="${escape(file.name)} upload" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(file.progress)}"><div class="progress-fill" style="width:${file.progress}%"></div></div>`:''}</div><span class="file-status ${file.status}">${status}</span><div class="row-actions">${file.status==='failed'||file.status==='cancelled'?`<button class="retry-button" data-action="retry" aria-label="Retry ${escape(file.name)}">Retry</button>`:''}${file.status!=='complete'?`<button class="icon-button" data-action="remove" aria-label="${file.status==='sending'?'Cancel':'Remove'} ${escape(file.name)}">${icon('close')}</button>`:''}</div></div>`;
+  }).join(''):'<div class="empty-queue">No files selected. Choose EPUB or PDF files.</div>';
+ }
+ function startSending(){if(running)return;running=true;nextUpload();timer=setInterval(tick,160);renderQueue();}
+ function nextUpload(){const next=queue.find(f=>f.status==='queued');if(next){next.status='sending';next.progress=0;return;}running=false;clearInterval(timer);renderQueue();}
+ function tick(){const file=queue.find(f=>f.status==='sending');if(!file){nextUpload();return;}file.progress=Math.min(100,file.progress+(file.size>3*mib?2.8:4.2));if(file.failOnce&&file.progress>=43){file.status='failed';file.failOnce=false;nextUpload();}else if(file.progress>=100){file.status='complete';library.push({id:`l${++sequence}`,name:uniqueName(file.name),folder:'Received Books',size:file.size,added:'Just now',date:29,file:file.file,demo:file.demo});nextUpload();}renderQueue();if(view==='files')renderLibrary();}
+ function uniqueName(name){let candidate=name,n=1;const at=name.lastIndexOf('.');while(library.some(f=>f.folder==='Received Books'&&f.name===candidate)){candidate=`${name.slice(0,at)} (${n++})${name.slice(at)}`;}return candidate;}
+ function visibleFiles(){let result=library.filter(f=>!folder||f.folder===folder);if(query)result=result.filter(f=>`${f.name} ${f.folder}`.toLowerCase().includes(query));return result.sort((a,b)=>sort==='size'?b.size-a.size:sort==='newest'?b.date-a.date:a.name.localeCompare(b.name));}
+ function fullPath(file){return `/${file.folder?`${file.folder}/`:''}${file.name}`;}
+ function selectedRows(files,removable=false){return files.map(file=>`<div class="selected-file">${tile(file.name)}<div class="selected-file-info"><strong>${escape(file.name)}</strong><div class="selected-path">${escape(fullPath(file))}</div></div><div class="selected-meta"><span class="filetype">${type(file.name)}</span><span>${size(file.size)}</span></div>${removable?`<button class="icon-button" data-deselect="${file.id}" aria-label="Remove ${escape(file.name)} from selection">${icon('close')}</button>`:''}</div>`).join('');}
+ function renderLibrary(){
+  const files=visibleFiles();$('#library-count').textContent=`${files.length} book${files.length===1?'':'s'}`;
+  $('#breadcrumbs').innerHTML=`<button data-folder="">All books</button>${folder?`${icon('chevron')}<span>${escape(folder)}</span>`:''}`;
+  $('#folders').hidden=!!folder||!!query;
+  $('#folders').innerHTML=['Received Books','Reading list','Favourites'].map(name=>{const count=library.filter(f=>f.folder===name).length;return `<button class="folder-card" data-folder="${name}">${icon('folder')}<span><strong>${name}</strong><small>${count} book${count===1?'':'s'}</small></span></button>`;}).join('');
+  $('#library-list').innerHTML=files.length?files.map(file=>`<div class="library-row ${selected.has(file.id)?'selected':''}"><div class="library-name"><input type="checkbox" data-select="${file.id}" aria-label="Select ${escape(file.name)}" ${selected.has(file.id)?'checked':''}>${tile(file.name)}<button class="file-link" data-detail="${file.id}"><strong title="${escape(file.name)}">${escape(file.name)}</strong><small>${file.folder?escape(file.folder):'Kobo storage'}</small></button></div><span>${size(file.size)}</span><span class="added-column">${file.added}</span><button class="icon-button download-button" data-download="${file.id}" aria-label="Download ${escape(file.name)}">${icon('download')}</button></div>`).join(''):'<div class="empty-queue">No books found. Try another search.</div>';
+  const visibleSelected=files.filter(f=>selected.has(f.id));$('#select-all').checked=!!files.length&&visibleSelected.length===files.length;$('#select-all').indeterminate=visibleSelected.length>0&&visibleSelected.length<files.length;
+  const chosen=library.filter(f=>selected.has(f.id));$('#selection-bar').hidden=!selected.size;$('#selection-count').textContent=`${selected.size} file${selected.size===1?'':'s'} selected`;$('#selection-size').textContent=`Total: ${size(chosen.reduce((n,f)=>n+f.size,0))} · one ZIP download`;$('#selected-files').innerHTML=selectedRows(chosen,true);
+ }
+ function showModal(content){$('#modal-content').innerHTML=content;$('#modal').showModal();}
+ function closeModal(){$('#modal').close();}
+ function showDetails(id){const file=library.find(f=>f.id===id);if(!file)return;showModal(`<div class="modal-icon">${icon('book')}</div><h2>${escape(file.name.replace(/\.(epub|pdf)$/i,''))}</h2><p>${escape(file.name)}</p><div class="detail-info"><div><span>Format</span><strong>${type(file.name)}</strong></div><div><span>Size</span><strong>${size(file.size)}</strong></div><div><span>Location</span><strong>${escape(file.folder||'Kobo storage')}</strong></div></div>${file.demo?'<p class="demo-note">This is a sample book. Downloads contain a text preview, not a real EPUB or PDF.</p>':''}<div class="modal-actions"><button class="button primary" id="detail-download">${icon('download')}Download ${file.demo?'preview':'file'}</button></div>`);$('#detail-download').onclick=()=>downloadOne(file.id);}
+ function downloadBlob(blob,name){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+ function payload(file){return file.file||new Blob([`Receive & Share — local UI prototype\n\nSample file: ${file.name}\nFolder: ${file.folder||'Kobo storage'}\n\nThis is a demonstration preview. No file was downloaded from a Kobo.\n`],{type:'text/plain;charset=utf-8'});}
+ function downloadName(file){return file.demo?`${file.name}.preview.txt`:file.name;}
+ function downloadOne(id){const file=library.find(f=>f.id===id);if(!file)return;downloadBlob(payload(file),downloadName(file));toast(file.demo?'Demo preview downloaded. Real book files will download in the finished app.':`${file.name} downloaded from this browser’s local copy.`);}
+ function bulkDialog(){const files=library.filter(f=>selected.has(f.id));showModal(`<h2>Download selected files</h2><p>Download one ZIP, keeping the folder paths shown below.</p><div class="zip-summary"><strong>${files.length} files selected</strong><strong>Total: ${size(files.reduce((n,f)=>n+f.size,0))}</strong></div><div class="zip-file-list">${selectedRows(files)}</div><p class="demo-note">Prototype: sample files are text previews. Files you chose yourself keep their contents.</p><div class="modal-actions"><button class="button secondary" id="cancel-bulk">Cancel</button><button class="button primary" id="confirm-bulk">Download ZIP</button></div>`);$('#cancel-bulk').onclick=closeModal;$('#confirm-bulk').onclick=()=>bulkDownload(files);}
+ async function bulkDownload(files){
+  const total=files.reduce((n,f)=>n+(f.file?f.size:1024),0);if(total>200*mib){toast('This local prototype limits browser-built ZIPs to 200 MiB.');return;}
+  $('#modal-content').innerHTML=`<h2>Preparing ZIP</h2><p>${files.length} files</p><div class="zip-progress"><span id="zip-progress-fill" style="width:0%"></span></div><p id="zip-status">Preparing files…</p>`;
+  try{const archive=await KoboZip.zipStore(files.map(f=>({name:`${f.folder||'Kobo storage'}/${downloadName(f)}`,blob:payload(f)})),(done,count)=>{$('#zip-progress-fill').style.width=`${done/count*100}%`;$('#zip-status').textContent=`${done} of ${count} files ready`;});downloadBlob(archive,'Receive & Share books.zip');closeModal();toast(`${files.length} files bundled into Receive & Share books.zip.`);}catch(error){closeModal();toast(`Could not build ZIP: ${error.message}`);}
+ }
+ document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>setView(button.dataset.view));
+ $('.brand').onclick=event=>{event.preventDefault();setView('upload');};
+ $('#choose-files').onclick=()=>$('#file-input').click();$('#file-input').onchange=event=>{addFiles(event.target.files);event.target.value='';};
+ const dropzone=$('#dropzone');['dragenter','dragover'].forEach(name=>dropzone.addEventListener(name,event=>{event.preventDefault();dropzone.classList.add('dragging');}));['dragleave','drop'].forEach(name=>dropzone.addEventListener(name,event=>{event.preventDefault();dropzone.classList.remove('dragging');}));dropzone.addEventListener('drop',event=>addFiles(event.dataTransfer.files));
+ $('#send-all').onclick=()=>{if(!queue.some(f=>f.status==='queued'))queue.filter(f=>f.status==='failed').forEach(f=>{f.status='queued';f.progress=0;});startSending();};$('#clear-completed').onclick=()=>{queue=queue.filter(f=>f.status!=='complete');renderQueue();};
+ $('#queue-list').onclick=event=>{const button=event.target.closest('[data-action]');if(!button)return;const id=button.closest('[data-id]').dataset.id,file=queue.find(f=>f.id===id);if(button.dataset.action==='retry'){file.status='queued';file.progress=0;renderQueue();startSending();}else{if(file.status==='sending'){file.status='cancelled';nextUpload();}else queue=queue.filter(f=>f.id!==id);renderQueue();}};
+ $('#file-search').oninput=event=>{query=event.target.value.toLowerCase().trim();renderLibrary();};$('#sort-files').onchange=event=>{sort=event.target.value;renderLibrary();};
+ $('#files-view').onclick=event=>{const folderButton=event.target.closest('[data-folder]');if(folderButton){folder=folderButton.dataset.folder;renderLibrary();}const detail=event.target.closest('[data-detail]');if(detail)showDetails(detail.dataset.detail);const download=event.target.closest('[data-download]');if(download)downloadOne(download.dataset.download);const remove=event.target.closest('[data-deselect]');if(remove){selected.delete(remove.dataset.deselect);renderLibrary();}};
+ $('#library-list').onchange=event=>{if(event.target.matches('[data-select]')){const id=event.target.dataset.select;event.target.checked?selected.add(id):selected.delete(id);renderLibrary();}};
+ $('#select-all').onchange=event=>{visibleFiles().forEach(file=>event.target.checked?selected.add(file.id):selected.delete(file.id));renderLibrary();};$('#clear-selection').onclick=()=>{selected.clear();renderLibrary();};$('#download-selected').onclick=bulkDialog;
+ $('#finish-help').onclick=()=>showModal(`<h2>Finish on the Kobo</h2><p>Tap <strong>Finish & import</strong> below the QR code on your Kobo. This adds received books to My Books and closes the receiving session.</p><div class="modal-actions"><button id="finish-got-it" class="button primary">Close</button></div>`);
+ $('#modal-content').addEventListener('click',event=>{if(event.target.id==='finish-got-it')closeModal();});$('#close-modal').onclick=closeModal;$('#modal').onclick=event=>{if(event.target===$('#modal'))closeModal();};
+ function preview(mobile){$('#frame').classList.toggle('phone',mobile);$('#desktop-view').classList.toggle('selected',!mobile);$('#phone-view').classList.toggle('selected',mobile);$('#desktop-view').setAttribute('aria-pressed',String(!mobile));$('#phone-view').setAttribute('aria-pressed',String(mobile));}
+ $('#desktop-view').onclick=()=>preview(false);$('#phone-view').onclick=()=>preview(true);$('#reset-demo').onclick=()=>{reset();setView('upload');toast('Demo reset. The PDF sample will interrupt once so you can try Retry.');};
+ reset();
+})();

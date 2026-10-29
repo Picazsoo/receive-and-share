@@ -1,0 +1,122 @@
+#!/bin/sh
+APP=/mnt/onboard/.adds/kobo-receive
+PIDFILE="$APP/receiver.pid"
+READY="$APP/ready"
+
+running() {
+    [ -f "$PIDFILE" ] || return 1
+    read -r receiver_pid < "$PIDFILE"
+    case "$receiver_pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$receiver_pid/cmdline" ] || return 1
+    tr '\000' '\n' < "/proc/$receiver_pid/cmdline" | grep -qx "$APP/kobo-receive" || return 1
+    kill -0 "$receiver_pid" 2>/dev/null
+}
+
+# Keep a running session on its original port when configuration changes.
+PORT=8080
+PORTFILE="$APP/port.txt"
+if running && [ -f "$APP/active-port" ]; then
+    PORTFILE="$APP/active-port"
+fi
+if [ -f "$PORTFILE" ]; then
+    PORT=$(tr -d '\r\n' < "$PORTFILE")
+    case "$PORT" in ''|0*|*[!0-9]*) echo 'Invalid port: use 1-65535.'; exit 1 ;; esac
+    if [ "${#PORT}" -gt 5 ] || [ "$PORT" -gt 65535 ]; then
+        echo 'Invalid port: use 1-65535.'; exit 1
+    fi
+fi
+
+check_local() {
+    echo '=== Loopback after setup ==='
+    /sbin/ifconfig lo
+    echo '=== HTTP health check ==='
+    if command -v wget >/dev/null 2>&1; then
+        wget -T 2 -O "$APP/health.txt" http://127.0.0.1:$PORT/health || return 1
+        grep -qx 'kobo-receive' "$APP/health.txt" || return 1
+        echo 'Local HTTP connection works.'
+    else
+        echo 'wget is not available; cannot verify the browser connection.'
+        return 1
+    fi
+}
+
+case "$1" in
+    open)
+        exec > "$APP/open.log" 2>&1 < /dev/null
+        /usr/bin/qndb -m mwcToast 2500 'Starting Receive & Share...'
+        if ! /bin/sh "$APP/control.sh" start; then
+            /usr/bin/qndb -m mwcToast 6000 'Receive & Share could not start. Check Wi-Fi and retry.'
+            exit 1
+        fi
+        # Native browser startup itself requests Wi-Fi. Wait for the temporary
+        # ForceWifiOn reconnect to finish so it does not open a connection dialog.
+        stable=0
+        for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+            if [ "$(cat /sys/class/net/wlan0/carrier 2>/dev/null)" = 1 ] &&
+                awk '$1 == "wlan0" && $2 == "00000000" { found=1 } END { exit !found }' /proc/net/route; then
+                stable=$((stable + 1))
+            else
+                stable=0
+            fi
+            if [ "$stable" -ge 3 ]; then
+                exec /usr/bin/qndb -m bwmOpenBrowser true http://127.0.0.1:$PORT/screen
+            fi
+            sleep 1
+        done
+        /usr/bin/qndb -m mwcToast 6000 'Wi-Fi is still connecting. Try Receive & Share again.'
+        exit 1
+        ;;
+    start)
+        exec > /mnt/onboard/receive-start.txt 2>&1
+        date
+        echo 'Launcher revision: loopback-check-4'
+        # Stock Kobo firmware may leave loopback down and without an IPv4 address.
+        # The QR browser uses 127.0.0.1, independently of the Wi-Fi upload address.
+        /sbin/ifconfig lo 127.0.0.1 up || {
+            echo 'Could not enable the local browser connection.'
+            exit 1
+        }
+        if running && [ -f "$READY" ]; then
+            echo 'Using existing receiver.'
+            check_local
+            exit $?
+        fi
+        if running; then
+            echo 'The session is starting or stopping. Try again in a moment.'
+            exit 1
+        fi
+        rm -f "$READY"
+        chmod +x "$APP/kobo-receive" || exit 1
+        printf '%s\n' "$PORT" > "$APP/active-port"
+        "$APP/kobo-receive" -port "$PORT" -ready "$READY" > "$APP/receiver.log" 2>&1 < /dev/null &
+        receiver_pid=$!
+        echo "$receiver_pid" > "$PIDFILE"
+        for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+            if [ -f "$READY" ] && kill -0 "$receiver_pid" 2>/dev/null; then
+                check_local
+                exit $?
+            fi
+            kill -0 "$receiver_pid" 2>/dev/null || break
+            sleep 1
+        done
+        echo 'Receiver could not start. Connect Wi-Fi first and try again.'
+        cat "$APP/receiver.log"
+        exit 1
+        ;;
+    stop)
+        if running; then
+            kill "$receiver_pid" || exit 1
+            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+                kill -0 "$receiver_pid" 2>/dev/null || break
+                sleep 1
+            done
+            if kill -0 "$receiver_pid" 2>/dev/null; then
+                echo 'Receiver is still stopping. Try Finish & refresh library again.'
+                exit 1
+            fi
+        fi
+        rm -f "$PIDFILE" "$READY" "$APP/active-port"
+        sync
+        ;;
+    *) echo 'Use open, start or stop'; exit 1 ;;
+esac
