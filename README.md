@@ -44,6 +44,39 @@ screen is a sample render of the production template with dummy receipts.
 
 ## Install
 
+### Copy one installer file
+
+Choose the package matching what is **already installed**:
+
+| Already installed | Package | Bundled dependencies |
+| --- | --- | --- |
+| NickelMenu and NickelDBus | `dist/KoboRoot.tgz` | None; existing versions are preserved |
+| NickelMenu only | `dist/with-nickeldbus/KoboRoot.tgz` | NickelDBus 0.2.0 |
+| Neither (first installation) | `dist/first-install/KoboRoot.tgz` | NickelMenu v0.6.0 and NickelDBus 0.2.0 |
+
+NickelMenu is installed if its menu appears on the Kobo. NickelDBus normally has
+the file `.adds/nickeldbus` on USB-visible storage. Bundled dependencies are pinned
+official releases with their MIT licenses included. These packages target the
+Kobo Libra 2 on firmware 4.38.23697 / 4.x; NickelMenu does not support firmware 5.x.
+
+1. Finish any active Receive & Share session, then connect the Kobo by USB.
+2. Copy the chosen **`KoboRoot.tgz` file itself**, without extracting it, into the
+   Kobo's hidden `.kobo` folder. Its filename must remain `KoboRoot.tgz`.
+3. Safely eject and disconnect. Wait for installation and the automatic restart,
+   then open **NickelMenu → Receive & Share**.
+
+All variants preserve existing Receive & Share settings, received books and other
+NickelMenu configuration files. Only our `.adds/nm/kobo-receive` menu entry is
+replaced. Dependency bundles **replace their named dependency binaries** and do
+not detect installed versions: use them only when those dependencies are missing.
+The app-only archive does not touch either dependency. No boot scripts, SSH
+configuration or firmware binaries are replaced.
+
+### Manual folder installation
+
+With NickelMenu and NickelDBus already installed, the original ZIP method remains
+available without a restart:
+
 The production interface is embedded from `receiver/web/` into the executable.
 The earlier [local prototype](prototype/index.html) and [UI plan](prototype/PLAN.md)
 are retained for reference; `node prototype/server.mjs` serves that separate,
@@ -209,6 +242,14 @@ The package includes third-party dependency licenses.
 On Windows, `./build.ps1` runs tests, builds the ARM executable, and creates the
 install ZIP. It also requires Node.js for the local HTTP smoke test. Use
 `./build.ps1 -Go C:\path\to\go.exe` to choose a compiler explicitly.
+
+`./build-installers.ps1` runs that build and creates the three `KoboRoot.tgz`
+variants listed above. It downloads the pinned official dependency archives and
+licenses, checks their SHA-256 hashes and member allowlists, and runs installer
+tests. `-SkipBuild` packages an already-built application. The standalone Go
+packager is in `installer/`; dependency downloads and outputs stay under ignored
+`dist/`. Installer tests check settings/menu preservation, ARM architecture,
+archive paths, executable permissions and explicit dependency selection.
 
 For a manual build, from `receiver`:
 
