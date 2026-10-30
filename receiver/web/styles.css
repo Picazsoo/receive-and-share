@@ -6,3 +6,6 @@
 .prototype-frame{margin-top:20px}.tool-header a{font-size:13px}.file-link small{overflow-wrap:anywhere;word-break:break-word}.selected-file-info{min-width:0}.modal-actions a{text-decoration:none}.queue-row .row-actions button{font-size:12px}
 
 #connection-banner{padding:12px;border:1px solid #8b7952;background:#fffbed;margin-top:16px;font-size:13px}.waiting .file-sub{color:#755c27}
+.conversion-option{margin-top:16px}.conversion-option label{display:flex;align-items:center;gap:9px;font-size:13px}.conversion-option p{margin:5px 0 0 26px;color:var(--muted);font-size:12px}.row-actions{flex-wrap:wrap}
+
+.danger{border-color:#9b4035;color:#8a3025;background:#fff}.danger:hover:not(:disabled){background:#faeeeb}.delete-results{padding-left:20px}.delete-results li{margin:12px 0;overflow-wrap:anywhere}.delete-results span{display:block}

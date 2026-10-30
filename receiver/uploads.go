@@ -13,6 +13,8 @@ type uploadJob struct {
 	Name     string `json:"name"`
 	Original string `json:"original"`
 	Size     int64  `json:"size"`
+	Convert  bool   `json:"convert"`
+	Message  string `json:"message,omitempty"`
 }
 
 var validUploadID = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -35,6 +37,11 @@ func (s *receiver) uploadStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, job)
 }
 func (s *receiver) retryableUpload(w http.ResponseWriter, r *http.Request) {
+	convert := r.Header.Get("X-Convert-EPUB") == "1"
+	if value := r.Header.Get("X-Convert-EPUB"); value != "" && value != "0" && value != "1" {
+		http.Error(w, "Invalid conversion option", 400)
+		return
+	}
 	id := r.Header.Get("X-Upload-ID")
 	if id != "" {
 		if !validUploadID.MatchString(id) {
@@ -52,12 +59,16 @@ func (s *receiver) retryableUpload(w http.ResponseWriter, r *http.Request) {
 		job, ok := s.jobs[key]
 		s.jobsMu.Unlock()
 		if ok {
-			if job.Original != original || job.Size != size {
+			if job.Original != original || job.Size != size || job.Convert != convert {
 				http.Error(w, "Upload ID belongs to a different file", 409)
 				return
 			}
 			if job.Status == "done" {
 				writeJSON(w, job)
+				return
+			}
+			if job.Status == "failed" {
+				http.Error(w, job.Message, 422)
 				return
 			}
 			http.Error(w, "This upload is still being checked. Retry shortly.", 409)
@@ -80,8 +91,12 @@ func (s *receiver) retryableUpload(w http.ResponseWriter, r *http.Request) {
 			s.jobsMu.Unlock()
 			original, _ := url.QueryUnescape(r.Header.Get("X-Upload-Name"))
 			expectedSize, _ := strconv.ParseInt(r.Header.Get("X-Upload-Size"), 10, 64)
-			if existing.Original != original || existing.Size != expectedSize {
+			if existing.Original != original || existing.Size != expectedSize || existing.Convert != convert {
 				http.Error(w, "Upload ID belongs to a different file", 409)
+				return
+			}
+			if existing.Status == "failed" {
+				http.Error(w, existing.Message, 422)
 				return
 			}
 			if existing.Status == "done" {
@@ -98,17 +113,29 @@ func (s *receiver) retryableUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		original, _ := url.QueryUnescape(r.Header.Get("X-Upload-Name"))
 		size, _ := strconv.ParseInt(r.Header.Get("X-Upload-Size"), 10, 64)
-		s.jobs[key] = uploadJob{Status: "receiving", Original: original, Size: size}
+		s.jobs[key] = uploadJob{Status: "receiving", Original: original, Size: size, Convert: convert}
 		s.jobsMu.Unlock()
 		defer func() {
 			s.jobsMu.Lock()
-			if s.jobs[key].Status != "done" {
+			if status := s.jobs[key].Status; status != "done" && status != "failed" {
 				delete(s.jobs, key)
 			}
 			s.jobsMu.Unlock()
 		}()
 	}
 	s.upload(w, r)
+}
+
+func (s *receiver) conversionStatus(r *http.Request, status, message string) {
+	if r.Header.Get("X-Upload-ID") == "" {
+		return
+	}
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	key := s.jobKey(r)
+	job := s.jobs[key]
+	job.Status, job.Message = status, message
+	s.jobs[key] = job
 }
 func (s *receiver) completeJob(r *http.Request, saved string) {
 	if r.Header.Get("X-Upload-ID") == "" {

@@ -25,6 +25,39 @@ func (s *receiver) browserScript(w http.ResponseWriter) {
 	w.Write([]byte(localHeartbeatJS))
 }
 
+func (s *receiver) reopenBrowser(w http.ResponseWriter, r *http.Request) {
+	if !local(r) {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != "POST" {
+		http.Error(w, "POST required", 405)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	if r.ParseForm() != nil || !equal(r.PostForm.Get("token"), s.token) {
+		http.Error(w, "Session changed", 403)
+		return
+	}
+	if !s.finishMu.TryLock() {
+		http.Error(w, "Session is finishing", 409)
+		return
+	}
+	defer s.finishMu.Unlock()
+	s.mu.Lock()
+	finishing := s.finishing
+	s.mu.Unlock()
+	if finishing || s.finished {
+		http.Error(w, "Session is finishing", 409)
+		return
+	}
+	s.leaseMu.Lock()
+	s.browserFirst, s.browserLast = time.Time{}, time.Time{}
+	s.browserArmed = false
+	s.leaseMu.Unlock()
+	w.Write([]byte("ready"))
+}
+
 const localHeartbeatJS = `(function(){
  var token=document.getElementById('source-token'),label=document.getElementById('browser-lease-status'),files=document.getElementById('session-files'),revision=files?files.getAttribute('data-revision'):null,json=window.JSON&&window.JSON.parse;if(!token||!window.XMLHttpRequest)return;
  function text(node,value){while(node.firstChild)node.removeChild(node.firstChild);node.appendChild(document.createTextNode(value));}
@@ -111,12 +144,14 @@ func (s *receiver) watchBrowser(ctx context.Context) {
 		case <-ticker.C:
 			// Time values retain Linux CLOCK_MONOTONIC readings: suspend time does not
 			// consume the grace period. A resumed browser has time to send its next beat.
+			s.finishMu.Lock()
 			if s.browserExpired(time.Now()) {
 				log.Print("Local browser heartbeat stopped; finishing and refreshing library")
-				if e := s.finishTransfers(); e != nil {
+				if e := s.finishTransfersLocked(); e != nil {
 					log.Printf("Automatic library refresh failed; receiving remains active: %v", e)
 				}
 			}
+			s.finishMu.Unlock()
 		}
 	}
 }

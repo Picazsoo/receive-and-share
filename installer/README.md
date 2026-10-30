@@ -1,11 +1,15 @@
 # KoboRoot packaging
 
-For a release bundle, run `./build-release.ps1 -Version 0.1`. This builds and tests
-the installers, then creates `dist/Receive-Share-v0.1.zip` with all three variants,
+Recipients must [exclude application folders from My Books](../docs/USAGE.md#keep-application-files-out-of-my-books)
+before installing. `.adds` is not automatically hidden from the library scanner.
+The archive preserves the user's Kobo configuration rather than replacing it.
+
+For a release bundle, run `./build-release.ps1 -Version 0.2`. This builds and tests
+the installers, then creates `dist/Receive-Share-v0.2.zip` with all three variants,
 release instructions, the MIT license and installer checksums. A separate
 `.zip.sha256` file verifies the download. Use `-SkipInstallers` only to bundle
 installers that were already built from the desired source. Release notes live in
-`docs/releases/v0.1.md`. Creating the bundle does not tag or publish a release.
+`docs/releases/v0.2.md`. Creating the bundle does not tag or publish a release.
 
 Run `./build-installers.ps1` from the repository root on Windows. Use `-SkipBuild`
 only when `package/` already contains the desired ARM receiver and licenses.

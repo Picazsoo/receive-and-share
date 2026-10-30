@@ -10,19 +10,22 @@ const address=readFileSync(path.join(state,'device-ip.txt'),'utf8').trim();
 if(!/^\d+\.\d+\.\d+\.\d+$/.test(address))throw Error('Invalid device address');
 const args=['-T','-p','2222','-i',path.join(state,'kobo_ed25519'),'-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o',`UserKnownHostsFile=${path.join(state,'known_hosts')}`,'-o','HostKeyAlias=kobo-libra2','-o','ConnectTimeout=8',`root@${address}`];
 const ssh=command=>execFileSync('ssh.exe',[...args,command],{encoding:'utf8',windowsHide:true,timeout:20000});
-const base=`http://${address}:8080/`;
-let screen=ssh('wget -qO- http://127.0.0.1:8080/screen');
+const port=Number(ssh('cat /mnt/onboard/.adds/kobo-receive/active-port 2>/dev/null || echo 8080').trim());
+assert.ok(Number.isInteger(port)&&port>=1&&port<=65535);
+const base=port===80?`http://${address}/`:`http://${address}:${port}/`;
+let screen=ssh(`wget -qO- http://127.0.0.1:${port}/screen`);
 const localToken=screen.match(/name="token" value="([a-f0-9]+)"/)?.[1];assert.ok(localToken);
-screen=ssh(`wget -qO- --post-data='token=${localToken}' http://127.0.0.1:8080/renew >/dev/null 2>&1; wget -qO- http://127.0.0.1:8080/screen`);
+screen=ssh(`wget -qO- --post-data='token=${localToken}' http://127.0.0.1:${port}/renew >/dev/null 2>&1; wget -qO- http://127.0.0.1:${port}/screen`);
 const code=screen.match(/class="code">([0-9]{6})</)?.[1];assert.ok(code,'fresh pairing code');
 const pairPage=await fetch(base);assert.equal(pairPage.status,200);const pairCookie=pairPage.headers.get('set-cookie').split(';')[0];const nonce=(await pairPage.text()).match(/name="nonce" value="([a-f0-9]+)"/)?.[1];assert.ok(nonce);
 const paired=await fetch(base+'pair',{method:'POST',body:new URLSearchParams({code,nonce,basic:'1'}),headers:{Cookie:pairCookie,Origin:'http://www.kobo.com'},redirect:'manual'});assert.equal(paired.status,303);assert.equal(paired.headers.get('location'),'/basic');
 const Cookie=paired.headers.get('set-cookie').split(';')[0];const session=await(await fetch(base+'api/session',{headers:{Cookie}})).json();assert.ok(session.csrf);
 assert.equal((await fetch(base+'screen')).status,404);assert.equal((await fetch(base+'api/files')).status,401);
-const previousSharing=ssh('wget -qO- http://127.0.0.1:8080/share-settings');
+const previousSharing=ssh(`wget -qO- http://127.0.0.1:${port}/share-settings`);
  const originalMode=/name="mode" value="all" checked/.test(previousSharing)?'all':'selected';
  const originalRemember=/name="remember" value="1" checked/.test(previousSharing);
- const setSharing=(mode,remember,files)=>{const form=new URLSearchParams({token:localToken,mode});if(remember)form.set('remember','1');names.forEach(n=>form.append('shown','Received Books/'+n));files.forEach(n=>form.append('file','Received Books/'+n));ssh(`wget -qO- --post-data='${form.toString()}' http://127.0.0.1:8080/share-settings >/dev/null 2>&1; echo updated`);};
+ const originalAllowDelete=/name="allow-delete" value="1" checked/.test(previousSharing);
+ const setSharing=(mode,remember,files,allowDelete=false)=>{const form=new URLSearchParams({token:localToken,mode});if(remember)form.set('remember','1');if(allowDelete)form.set('allow-delete','1');names.forEach(n=>form.append('shown','Received Books/'+n));files.forEach(n=>form.append('file','Received Books/'+n));ssh(`wget -qO- --post-data='${form.toString()}' http://127.0.0.1:${port}/share-settings >/dev/null 2>&1; echo updated`);};
  const names=[`Receive & Share test ${randomBytes(6).toString('hex')}.pdf`,`Receive & Share test ${randomBytes(6).toString('hex')}.pdf`];
 const bytes=Buffer.from('%PDF-1.7\nReceive & Share disposable integration test\n%%EOF\n');
 try {
@@ -38,9 +41,25 @@ try {
  const end=zip.lastIndexOf(Buffer.from([0x50,0x4b,0x05,0x06]));assert.ok(end>=0);assert.equal(zip.readUInt16LE(end+10),2);let at=zip.readUInt32LE(end+16);
  for(let i=0;i<2;i++){assert.equal(zip.readUInt32LE(at),0x02014b50);assert.equal(zip.readUInt16LE(at+10),0);const length=zip.readUInt32LE(at+20),nameLength=zip.readUInt16LE(at+28),extra=zip.readUInt16LE(at+30),comment=zip.readUInt16LE(at+32),offset=zip.readUInt32LE(at+42);assert.equal(zip.subarray(at+46,at+46+nameLength).toString(),selected[i].path);const start=offset+30+zip.readUInt16LE(offset+26)+zip.readUInt16LE(offset+28);assert.deepEqual(zip.subarray(start,start+length),bytes);at+=46+nameLength+extra+comment;}
  const basic=await(await fetch(base+'basic',{headers:{Cookie}})).text();assert.ok(!basic.includes('<script'));assert.ok(basic.includes(names[0].replaceAll('&','&amp;')));
- console.log(`PASS on Kobo: native ARM server, pairing, basic/modern uploads, listing (${listing.length} books), downloads, ZIP contents, and native-browser form headers.`);
+ // Permission is separate from sharing. Only the two disposable files are reviewed.
+ assert.equal((await fetch(base+'api/delete-review',{method:'POST',headers:{Cookie},body:form})).status,403);
+ setSharing('selected',false,names,true);
+ const deletionReview=await fetch(base+'api/delete-review',{method:'POST',headers:{Cookie},body:form});assert.equal(deletionReview.status,200);
+ const deletion=await deletionReview.json();assert.equal(deletion.files.length,2);
+ const commit=new URLSearchParams({csrf:session.csrf,confirmation:deletion.confirmation});
+ // A change after confirmation must preserve the changed book while deleting the other.
+ ssh(`printf '%s' '%PDF-1.7 disposable file changed after review' > '/mnt/onboard/Received Books/${names[0]}'`);
+ const deleted=await fetch(base+'api/delete',{method:'POST',headers:{Cookie},body:commit});assert.equal(deleted.status,200);
+ const results=await deleted.json();assert.equal(results[0].deleted,false);assert.equal(results[1].deleted,true);
+ assert.equal((await fetch(base+'download?file='+encodeURIComponent(selected[0].path),{headers:{Cookie}})).status,200);
+ assert.equal((await fetch(base+'download?file='+encodeURIComponent(selected[1].path),{headers:{Cookie}})).status,404);
+ // A lost-response retry must not remove a new book placed at the deleted path.
+ ssh(`printf '%s' '%PDF-1.7 disposable replacement' > '/mnt/onboard/Received Books/${names[1]}'`);
+ const repeated=await fetch(base+'api/delete',{method:'POST',headers:{Cookie},body:commit});assert.deepEqual(await repeated.json(),results);
+ assert.equal((await fetch(base+'download?file='+encodeURIComponent(selected[1].path),{headers:{Cookie}})).status,200);
+ console.log(`PASS on Kobo: native ARM server, pairing, basic/modern uploads, listing (${listing.length} books), downloads, ZIP contents, native-browser form headers, default-off deletion, partial deletion results and safe acknowledgement retry.`);
 } finally {
- setSharing(originalMode,originalRemember,[]);
+ setSharing(originalMode,originalRemember,[],originalAllowDelete);
  // Only the two unique test names generated by this run are removed.
  for(const name of names){assert.match(name,/^Receive & Share test [a-f0-9]{12}\.pdf$/);ssh(`rm -f '/mnt/onboard/Received Books/${name}'`);}
 }

@@ -108,6 +108,28 @@ func TestInterruptedMultipartLeavesNoReceiptOrFile(t *testing.T) {
 
 type brokenReader struct{}
 
+func TestPort80AddressesAndQRHaveNoPortOrTrailingSlash(t *testing.T) {
+	s := fixture(t)
+	s.setNetwork("192.168.1.2", "kobo-test.local", "advertised", 80)
+	for _, tc := range []struct{ choice, address, qr string }{{"local", "http://kobo-test.local", "/qr.png"}, {"ip", "http://192.168.1.2", "/qr.png?address=ip"}} {
+		r := httptest.NewRequest("GET", "http://127.0.0.1/screen?address="+tc.choice, nil)
+		r.RemoteAddr = "127.0.0.1:1234"
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `<p class="address">`+tc.address+`<br>`) {
+			t.Fatal("address was not shortened", w.Code, w.Body)
+		}
+		r = httptest.NewRequest("GET", "http://127.0.0.1"+tc.qr, nil)
+		r.RemoteAddr = "127.0.0.1:1234"
+		w = httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		expected, _ := qrcode.Encode(tc.address, qrcode.Medium, 420)
+		if !bytes.Equal(w.Body.Bytes(), expected) {
+			t.Fatal("QR does not encode the short address")
+		}
+	}
+}
+
 func TestQRAddressChoicePersistsForSession(t *testing.T) {
 	s := fixture(t)
 	s.url = "http://kobo-test.local:8080/"
@@ -125,7 +147,7 @@ func TestQRAddressChoicePersistsForSession(t *testing.T) {
 	r.RemoteAddr = "127.0.0.1:1234"
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, r)
-	expected, _ := qrcode.Encode(s.fallbackURL, qrcode.Medium, 420)
+	expected, _ := qrcode.Encode(strings.TrimSuffix(s.fallbackURL, "/"), qrcode.Medium, 420)
 	if !bytes.Equal(w.Body.Bytes(), expected) {
 		t.Fatal("QR did not encode the fallback IP")
 	}

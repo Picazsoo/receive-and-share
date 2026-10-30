@@ -33,4 +33,9 @@ func TestHiddenDirectoryShortAlias(t *testing.T) {
 	if download.Code == 200 || zip.Code == 200 || review.Code == 200 {
 		t.Fatal("hidden directory can be downloaded through its short name")
 	}
+	s.allowDelete = true
+	deletion := call(s, "POST", "/api/delete-review", url.Values{"csrf": {"test-csrf"}, "file": {alias}}.Encode(), true)
+	if deletion.Code == 200 {
+		t.Fatal("hidden directory can be selected for deletion through its short name")
+	}
 }

@@ -2,7 +2,67 @@
 
 [Project README](../README.md). Commands and file paths below are relative to the repository root unless stated otherwise.
 
+## Optional EPUB conversion
+
+Enable **Convert EPUB to Kobo EPUB (.kepub.epub)** before sending files in either
+the enhanced or basic browser view. It is off by default. Only the converted copy
+is saved on the Kobo; the sending device's original is unchanged. PDFs and files
+already ending in `.kepub.epub` pass through unchanged.
+
+The enhanced view shows conversion after uploading. If conversion fails, use
+**Send original EPUB**. In basic view, return to the upload form, turn conversion
+off and select the original file again. Upload receipts cover conversion too, so
+reconnecting after a lost acknowledgement does not save another copy.
+
+Conversion uses unmodified kepubify v4.0.4 in a separate process, one upload at a
+time, with a 90-second timeout and a 96 MiB Go soft memory budget. Archives are
+limited to 4,096 entries, 128 MiB expanded total, 8 MiB per entry and 2 MiB for
+HTML/XML/OPF/NCX documents. Output is limited to 128 MiB. Books beyond these limits
+can still be uploaded as original EPUBs within the ordinary upload limit.
+
+## Optional deletion
+
+On the source Kobo, open **What to share**, check **Allow deleting shared books**
+and save. This permission is separate from Share all and is never remembered for
+the next session. With Share all, any eligible book may be selected; with selected
+sharing, only the shared books may be deleted.
+
+In **Files on Kobo**, select up to 100 books and choose **Delete selected**. Review
+the full paths, filenames, file types and sizes, then choose **Delete permanently**.
+The basic view offers **Review deletion** for the same selected files. Each file
+gets a result, so failed deletions can be reviewed again. Changed files are refused.
+Confirmations expire after two minutes and belong to the paired client. Permission
+or sharing changes invalidate pending confirmations. Retrying a completed request
+returns its original results, without deleting a replacement at the same path.
+
+Deletion is permanent. **Finish & refresh library** updates Kobo's My Books after
+deletions as well as uploads. Reading progress and annotations may be removed.
+The finished page lists received books and successfully deleted books separately,
+with deletion paths, sizes and times. Failed deletions are not counted.
+System/hidden folders, symlinks and non-book files cannot be selected for deletion.
+
 ## Install
+
+### Keep application files out of My Books
+
+Firmware 4.17 and newer can index supported files inside hidden folders. Before
+installing, connect by USB and edit `.kobo/Kobo/Kobo eReader.conf`. Under the
+existing `[FeatureSettings]` section, add this line if no exclusion is configured:
+
+```ini
+ExcludeSyncFolders=(\\.(?!kobo|adobe).+|([^.][^/]*/)+\\..+)
+```
+
+Preserve an existing custom exclusion rather than overwriting it. Safely eject
+and disconnect once so Kobo reloads its settings, then reconnect to install.
+This is the exclusion documented by
+[KOReader](https://github.com/koreader/koreader/wiki/Installation-on-Kobo-devices).
+
+If support files already appear as books, back up the app before changing this
+setting: Kobo may delete files it previously indexed while removing their library
+entries. Do not delete those entries through My Books without a backup, since
+files such as `port.txt` are live app settings. Restore missing support files from
+the backup after the cleanup and before starting the app again.
 
 ### Copy one installer file
 

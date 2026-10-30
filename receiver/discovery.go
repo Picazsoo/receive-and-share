@@ -150,7 +150,7 @@ func (s *receiver) setNetwork(ip, host, status string, port int) {
 			s.allowedHosts[fmt.Sprintf("%s:%d", h, port)] = true
 		}
 	}
-	if png, e := qrcode.Encode(s.url, qrcode.Medium, 420); e == nil {
+	if png, e := qrcode.Encode(strings.TrimSuffix(s.url, "/"), qrcode.Medium, 420); e == nil {
 		s.qr = png
 	}
 }

@@ -17,6 +17,11 @@ These scripts run on the Kobo through an already secured SSH connection.
 
 SSH installation and credentials are intentionally separate from the receiver.
 
+`conversion-device.mjs` tests EPUB conversion on the installed ARM receiver using
+a generated 20-chapter book. It verifies the downloaded KEPUB and duplicate-upload
+receipt, temporarily shares only its own test file where needed, restores sharing
+choices and removes that unique file. Run `node tools/conversion-device.mjs ../.local-ssh`.
+
 `security-device.mjs` uses the same pinned SSH state to check that a rejected Host
 with an incomplete body closes promptly, and that a newly created disposable hidden
 PDF cannot be listed, downloaded, reviewed or zipped through the real FAT `ADDS~1`
@@ -27,7 +32,9 @@ and removes only its unique test file. It never reads existing hidden book conte
 client state (`node tools/smoke-device.mjs ../.local-ssh`). It pairs over real Wi-Fi,
 uploads two uniquely named disposable PDFs, checks both download routes and ZIP
 payloads, and removes only its own test files. It tests legacy native-browser Origin
-headers too. It renews the source Kobo's pairing code and requires an awake device.
+headers, separate deletion permission, changed-file protection and safe retries of
+completed deletions too. It restores sharing/deletion choices, renews the source
+Kobo's pairing code and requires an awake device.
 
 `fault-proxy.mjs` is a loopback-only development server for reconnect testing. It
 forwards :4182 to a local receiver on :4181, with POST controls on :4183 for

@@ -103,6 +103,7 @@ func (s *receiver) shareSettings(w http.ResponseWriter, r *http.Request) {
 			s.shared[p] = true
 		}
 		s.shareAll = all
+		s.allowDelete = r.PostForm.Get("allow-delete") == "1"
 		s.rememberShareAll = remember
 		s.shareRevision++
 		s.shareMu.Unlock()
@@ -140,7 +141,7 @@ func (s *receiver) shareSettings(w http.ResponseWriter, r *http.Request) {
 	for _, b := range filtered[start:end] {
 		rows = append(rows, row{b, s.shared[b.Path]})
 	}
-	all, remember := s.shareAll, s.rememberShareAll
+	all, remember, allowDelete := s.shareAll, s.rememberShareAll, s.allowDelete
 	s.shareMu.RUnlock()
 	link := func(n int) string {
 		return "/share-settings?" + url.Values{"page": {strconv.Itoa(n)}, "q": {r.URL.Query().Get("q")}}.Encode()
@@ -155,9 +156,9 @@ func (s *receiver) shareSettings(w http.ResponseWriter, r *http.Request) {
 	s.localRender(w, sharingPage, struct {
 		Files                                 []row
 		Token, Query, Previous, Next, Summary string
-		All, Remember, Saved                  bool
+		All, Remember, Saved, AllowDelete     bool
 		Page, Total                           int
-	}{rows, s.token, r.URL.Query().Get("q"), previous, next, s.sharingSummary(), all, remember, r.URL.Query().Get("saved") == "1", page, total})
+	}{rows, s.token, r.URL.Query().Get("q"), previous, next, s.sharingSummary(), all, remember, r.URL.Query().Get("saved") == "1", allowDelete, page, total})
 }
 
-const sharingPage = localPageHead + backToConnection + `<h1>Books to share</h1><p>Current: <b>{{.Summary}}</b></p>{{if .Saved}}<p class="error">Sharing choices saved.</p>{{end}}<form class="search-form" action="/share-settings" method="get"><label>Find books <input name="q" value="{{display .Query}}"></label><button>Search</button></form><form action="/share-settings" method="post"><input type="hidden" name="token" value="{{.Token}}"><input type="hidden" name="q" value="{{.Query}}"><input type="hidden" name="page" value="{{.Page}}"><p><label class="choice"><input type="radio" name="mode" value="all" {{if .All}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> Share all books</label><label class="choice"><input type="radio" name="mode" value="selected" {{if not .All}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> Share only selected books</label></p><p><label class="choice"><input type="checkbox" name="remember" value="1" {{if .Remember}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> Remember “Share all” for next time</label></p><p><small>Selected books apply to this session only. With none selected, other devices can upload but cannot browse or download books. Changes affect new requests; downloads already underway may finish.</small></p><button>Save sharing choices</button><p>{{.Total}} matching books. Save before changing pages or searching.</p><table>{{range .Files}}<tr><td><input type="hidden" name="shown" value="{{.Path}}"><label class="choice"><input type="checkbox" name="file" value="{{.Path}}" {{if .Checked}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> {{display .Name}}</label><div class="path">/{{display .Path}}</div></td><td>{{.Type}}<br>{{size .Size}}</td></tr>{{else}}<tr><td>No matching books.</td></tr>{{end}}</table><button>Save sharing choices</button></form>{{if .Previous}}<a href="{{.Previous}}">Previous page</a>{{end}} {{if .Next}}<a href="{{.Next}}">Next page</a>{{end}}` + backToConnection + `</body></html>`
+const sharingPage = localPageHead + backToConnection + `<h1>Books to share</h1><p>Current: <b>{{.Summary}}</b></p>{{if .Saved}}<p class="error">Sharing choices saved.</p>{{end}}<form class="search-form" action="/share-settings" method="get"><label>Find books <input name="q" value="{{display .Query}}"></label><button>Search</button></form><form action="/share-settings" method="post"><input type="hidden" name="token" value="{{.Token}}"><input type="hidden" name="q" value="{{.Query}}"><input type="hidden" name="page" value="{{.Page}}"><p><label class="choice"><input type="radio" name="mode" value="all" {{if .All}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> Share all books</label><label class="choice"><input type="radio" name="mode" value="selected" {{if not .All}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> Share only selected books</label></p><p><label class="choice"><input type="checkbox" name="remember" value="1" {{if .Remember}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> Remember “Share all” for next time</label></p><p><label class="choice"><input type="checkbox" name="allow-delete" value="1" {{if .AllowDelete}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> Allow deleting shared books</label><small>Off by default for each new session. Independent of Share all. Deletion is permanent and may remove reading progress and annotations after the library refresh.</small></p><p><small>Selected books apply to this session only. With none selected, other devices can upload but cannot browse or download books. Changes affect new requests; downloads already underway may finish.</small></p><button>Save sharing choices</button><p>{{.Total}} matching books. Save before changing pages or searching.</p><table>{{range .Files}}<tr><td><input type="hidden" name="shown" value="{{.Path}}"><label class="choice"><input type="checkbox" name="file" value="{{.Path}}" {{if .Checked}}checked{{end}}><span class="control-mark" aria-hidden="true"></span> {{display .Name}}</label><div class="path">/{{display .Path}}</div></td><td>{{.Type}}<br>{{size .Size}}</td></tr>{{else}}<tr><td>No matching books.</td></tr>{{end}}</table><button>Save sharing choices</button></form>{{if .Previous}}<a href="{{.Previous}}">Previous page</a>{{end}} {{if .Next}}<a href="{{.Next}}">Next page</a>{{end}}` + backToConnection + `</body></html>`

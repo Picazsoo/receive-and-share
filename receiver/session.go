@@ -29,6 +29,24 @@ type receivedFile struct {
 	Time      string `json:"time"`
 }
 
+type finishedSession struct {
+	Count, DeletedCount int
+	Total, DeletedTotal int64
+	Files, Deleted      []receivedFile
+}
+
+func (s *receiver) deletedSnapshot() (int64, []receivedFile) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	files := make([]receivedFile, 0, len(s.deleted))
+	var total int64
+	for i := len(s.deleted) - 1; i >= 0; i-- {
+		files = append(files, s.deleted[i])
+		total += s.deleted[i].Size
+	}
+	return total, files
+}
+
 func newReceivedFile(s *receiver, name string, size int64) receivedFile {
 	p := filepath.Join(s.dest, name)
 	if s.root != nil {

@@ -15,7 +15,7 @@ try {
  for(let n=0;n<40;n++){try{response=await fetch('http://127.0.0.1:18080/screen');break;}catch{await new Promise(r=>setTimeout(r,50));}}
  assert.equal(response?.status,200,log);
  const screen=await response.text();
- const url='http://127.0.0.1:18080/';assert.ok(screen.includes(url),'short address on QR screen');
+ const url='http://127.0.0.1:18080/';assert.ok(screen.includes(url.slice(0,-1)),'short address on QR screen');
  const sourceToken=screen.match(/name="token" value="([a-f0-9]+)"/)?.[1];assert.ok(sourceToken);
  assert.equal((await fetch(url+'share-settings',{method:'POST',body:new URLSearchParams({token:sourceToken,mode:'all'}),redirect:'manual'})).status,303);
  const code=screen.match(/class="code">([0-9]{6})</)?.[1];assert.ok(code,'pairing PIN on local screen');

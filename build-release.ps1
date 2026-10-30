@@ -1,4 +1,4 @@
-param([string]$Version = '0.1', [string]$Go, [switch]$SkipInstallers)
+param([string]$Version = '0.2', [string]$Go, [switch]$SkipInstallers)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+(?:\.\d+)?$') { throw 'Use a numeric release version, for example 0.1.' }
 $notes = Join-Path $PSScriptRoot "docs\releases\v$Version.md"

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -76,6 +78,17 @@ func TestReadableSizeUnits(t *testing.T) {
 }
 func TestFinishedScreenIncludesSessionBooks(t *testing.T) {
 	s := fixture(t)
+	s.allowDelete = true
+	seed(t, s, "Books/deleted.pdf")
+	seed(t, s, "Books/not-deleted.pdf")
+	token := reviewDeletion(t, s, "Books/deleted.pdf", "Books/not-deleted.pdf")
+	// Replace one reviewed file with different content to force a per-file refusal.
+	if err := os.WriteFile(filepath.Join(s.dest, "Books/not-deleted.pdf"), []byte("%PDF-1.7 changed"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if w := call(s, "POST", "/api/delete", deleteConfirmation(s, token), true); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
 	if w := post(t, s, "finished.pdf", []byte("%PDF-1.7\nhello")); w.Code != 200 {
 		t.Fatal(w.Code)
 	}
@@ -85,9 +98,12 @@ func TestFinishedScreenIncludesSessionBooks(t *testing.T) {
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, r)
-	for _, text := range []string{"Session finished", "1 book received", "finished.pdf", "0.0 KB"} {
+	for _, text := range []string{"Session finished", "1 book received", "finished.pdf", "0.0 KB", "1 book deleted", "Books/deleted.pdf"} {
 		if !strings.Contains(w.Body.String(), text) {
 			t.Fatal("finished receipt missing", text, w.Body)
 		}
+	}
+	if strings.Contains(w.Body.String(), "not-deleted.pdf") {
+		t.Fatal("failed deletion appeared in finished history", w.Body)
 	}
 }

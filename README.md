@@ -18,6 +18,9 @@ remain compatible.
 
 ## Install
 
+First [exclude application folders from My Books](docs/USAGE.md#keep-application-files-out-of-my-books).
+Kobo firmware can index files inside `.adds`, even though it is a hidden folder.
+
 Choose according to what is already installed:
 
 | Already installed | Package |
@@ -40,8 +43,8 @@ an actual Kobo update cycle. [Manual ZIP installation and other details](docs/US
 ## Use
 
 1. Connect both devices to the same Wi-Fi.
-2. Open **NickelMenu → Receive & Share**. Startup may take a while. If it stalls,
-   turn Wi-Fi on manually, connect to a network and launch it again.
+2. Open **NickelMenu → Receive & Share**. If Wi-Fi is not connected, the app asks
+   you to turn it on, choose a network and launch again.
 3. Scan the QR code or enter the address, then enter the pairing code.
 4. Choose files to upload, or open **Files on Kobo** to download books.
 5. Tap **Finish & refresh library** on the source Kobo when done. It stops the
@@ -56,9 +59,20 @@ expire after two minutes; paired browsers stay connected for the session.
 Select books and save, or choose **Share all**. Remembering Share all enables it on
 future launches; individual selections last only for the current session.
 
+To delete books from a browser, separately enable **Allow deleting shared books**
+under **What to share** on the source Kobo. It is off for each new session.
+Select books in the browser, choose **Delete selected** and confirm the file list.
+Deletion is permanent. Finish and refresh the library afterwards; reading progress
+and annotations for deleted books may be removed.
+
 Keep the Kobo awake and avoid USB during transfers. If Wi-Fi drops, leave the
 client page open and reconnect the Kobo. Interrupted uploads restart from the
 beginning. Transfers use local HTTP without encryption.
+
+Uploads can optionally convert EPUB to Kobo EPUB using
+[kepubify](https://github.com/pgaskin/kepubify). Enable the checkbox before sending.
+Only the converted `.kepub.epub` is saved; PDFs and existing KEPUBs stay unchanged.
+Conversion is off by default. If it fails, choose **Send original EPUB** instead.
 
 ## Screenshots
 

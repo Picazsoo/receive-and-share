@@ -16,8 +16,8 @@ function node(selector) {
 }
 const requests = [];
 class XHR {
-  constructor(){ this.upload={}; requests.push(this); }
-  open(){} setRequestHeader(){} send(){} abort(){ this.onabort(); }
+  constructor(){ this.upload={}; this.headers={}; requests.push(this); }
+  open(){} setRequestHeader(name,value){this.headers[name]=value;} send(){} abort(){ this.onabort(); }
 }
 let timerID=0;
 const context=vm.createContext({
@@ -33,7 +33,7 @@ const context=vm.createContext({
     {csrf:'new-csrf',instance:'new-instance',shareRevision:0}}),
 });
 let source=await readFile(new URL('./web/app.js',import.meta.url),'utf8');
-source=source.replace(/\}\)\(\);\s*$/, `globalThis.review={upload,send,pairAgain,poll,seed(f){queue=[f];csrf='old-csrf';instance='old-instance';connection='online';},get connection(){return connection;}};})();`);
+source=source.replace(/\}\)\(\);\s*$/, `globalThis.review={upload,send,pairAgain,poll,deleteDialog,seedFiles(files){library=files;selected=new Set(files.map(f=>f.path));allowDelete=true;connection="online";},seed(f){queue=[f];csrf='old-csrf';instance='old-instance';connection='online';},get connection(){return connection;}};})();`);
 vm.runInContext(source,context);
 await new Promise(resolve=>setImmediate(resolve));
 const app=context.review;
@@ -57,4 +57,39 @@ for (const mode of ['pair','restart']) {
  await app.poll();await app.send();
  assert.equal(requests.length,before+1,'No automatic upload after '+mode);
 }
-console.log('PASS: re-pairing and receiver restart cancel uploads and ignore stale XHR callbacks; retry remains explicit.');
+// A failed conversion offers an explicit, new upload of the original EPUB.
+const original={uploadID:'b'.repeat(32),id:'1',name:'original.epub',size:24,file:{},status:'failed',convert:true,conversionFailed:true,error:'Conversion failed'};
+app.seed(original);
+const previousID=original.uploadID,before=requests.length;
+const button={dataset:{action:'original'},closest:()=>({dataset:{id:'1'}})};
+node('#queue-list').onclick({target:{closest:()=>button}});
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(requests.length,before+1);
+assert.equal(original.convert,false);
+assert.notEqual(original.uploadID,previousID);
+assert.equal(requests[before].headers['X-Convert-EPUB'],'0');
+const xhr=requests[before];xhr.status=200;xhr.responseText=JSON.stringify({name:'original.epub'});xhr.onload();
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(original.status,'complete');
+// Reviewing a bulk deletion must not delete anything until explicit confirmation.
+const files=[{path:'Books/a.pdf',name:'a.pdf',type:'PDF',size:24},{path:'Books/b.epub',name:'b.epub',type:'EPUB',size:42}];
+app.seedFiles(files);
+let deletions=0;
+context.fetch=async (url,options)=>({ok:true,status:200,json:async()=>{
+ if(url==='/api/delete-review'){
+  assert.equal(options.method,'POST');assert.deepEqual(options.body.getAll('file'),files.map(f=>f.path));
+  return {confirmation:'review-token',files,total:66};
+ }
+ if(url==='/api/delete'){
+  deletions++;assert.equal(options.body.get('confirmation'),'review-token');assert.equal(options.body.has('file'),false);
+  return [{path:files[0].path,deleted:true,message:'Deleted'},{path:files[1].path,deleted:false,message:'Book changed'}];
+ }
+ if(url==='/api/files')return [files[1]];
+ throw Error('Unexpected request '+url);
+}});
+await app.deleteDialog();assert.equal(deletions,0);
+assert.match(node('#modal-content').innerHTML,/Delete permanently/);
+assert.match(node('#modal-content').innerHTML,/Books\/a.pdf/);
+await node('#delete-confirm').onsubmit({preventDefault(){},target:{querySelector:()=>node('delete-submit')}});
+assert.equal(deletions,1);assert.match(node('#modal-content').innerHTML,/1 of 2 books deleted/);assert.match(node('#modal-content').innerHTML,/Book changed/);
+console.log('PASS: reconnect isolation, conversion fallback, and explicit bulk-deletion confirmation with per-file results.');

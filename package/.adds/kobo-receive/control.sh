@@ -31,8 +31,8 @@ check_local() {
     /sbin/ifconfig lo
     echo '=== HTTP health check ==='
     if command -v wget >/dev/null 2>&1; then
-        wget -T 2 -O "$APP/health.txt" http://127.0.0.1:$PORT/health || return 1
-        grep -qx 'kobo-receive' "$APP/health.txt" || return 1
+        wget -T 2 -O /tmp/kobo-receive-health.txt http://127.0.0.1:$PORT/health || return 1
+        grep -qx 'kobo-receive' /tmp/kobo-receive-health.txt || return 1
         echo 'Local HTTP connection works.'
     else
         echo 'wget is not available; cannot verify the browser connection.'
@@ -40,15 +40,31 @@ check_local() {
     fi
 }
 
+wifi_connected() {
+    [ "$(cat /sys/class/net/wlan0/carrier 2>/dev/null)" = 1 ] &&
+        awk '$1 == "wlan0" && $2 == "00000000" { found=1 } END { exit !found }' /proc/net/route
+}
+
+prepare_browser() {
+    token=$(wget -T 2 -qO- http://127.0.0.1:$PORT/screen | sed -n 's/.*name="token" value="\([^"]*\)".*/\1/p')
+    case "$token" in ''|*[!a-f0-9]*) return 1 ;; esac
+    wget -T 2 -qO /tmp/kobo-receive-reopen.txt --post-data="token=$token" http://127.0.0.1:$PORT/local-reopen
+}
+
 case "$1" in
     open)
         exec > "$APP/open.log" 2>&1 < /dev/null
-        /usr/bin/qndb -m mwcToast 15000 'Starting Receive & Share...
-Waiting for Wi-Fi to turn on and connect. This may take a while.
-If it does not start, turn Wi-Fi on manually, connect to a network, then launch Receive & Share again.'
+        if ! wifi_connected; then
+            /usr/bin/qndb -m mwcToast 5000 'Turn on Wi-Fi, connect, then try again.'
+            exit 1
+        fi
+        /usr/bin/qndb -m mwcToast 5000 'Starting Receive & Share...'
         if ! /bin/sh "$APP/control.sh" start; then
-            /usr/bin/qndb -m mwcToast 15000 'Receive & Share could not start.
-Turn Wi-Fi on manually, connect to a network, then launch Receive & Share again.'
+            /usr/bin/qndb -m mwcToast 5000 'Could not start. Check Wi-Fi and try again.'
+            exit 1
+        fi
+        if ! prepare_browser; then
+            /usr/bin/qndb -m mwcToast 5000 'Session is finishing. Wait a moment and try again.'
             exit 1
         fi
         # Native browser startup itself requests Wi-Fi. Wait for the temporary
@@ -62,18 +78,25 @@ Turn Wi-Fi on manually, connect to a network, then launch Receive & Share again.
                 stable=0
             fi
             if [ "$stable" -ge 3 ]; then
+                if ! check_local; then
+                    /usr/bin/qndb -m mwcToast 5000 'The session stopped. Launch Receive & Share again.'
+                    exit 1
+                fi
                 exec /usr/bin/qndb -m bwmOpenBrowser true http://127.0.0.1:$PORT/screen
             fi
             sleep 1
         done
-        /usr/bin/qndb -m mwcToast 15000 'Wi-Fi is still connecting.
-Turn Wi-Fi on manually, connect to a network, then launch Receive & Share again.'
+        /usr/bin/qndb -m mwcToast 5000 'Wi-Fi is still connecting. Connect, then try again.'
         exit 1
         ;;
     start)
-        exec > /mnt/onboard/receive-start.txt 2>&1
+        exec > /tmp/kobo-receive-start.log 2>&1
         date
-        echo 'Launcher revision: loopback-check-4'
+        echo 'Launcher revision: manual-wifi-6'
+        if ! wifi_connected; then
+            echo 'Turn on Wi-Fi, connect to a network, then launch Receive & Share again.'
+            exit 1
+        fi
         # Stock Kobo firmware may leave loopback down and without an IPv4 address.
         # The QR browser uses 127.0.0.1, independently of the Wi-Fi upload address.
         /sbin/ifconfig lo 127.0.0.1 up || {
@@ -95,12 +118,17 @@ Turn Wi-Fi on manually, connect to a network, then launch Receive & Share again.
         "$APP/kobo-receive" -port "$PORT" -ready "$READY" > "$APP/receiver.log" 2>&1 < /dev/null &
         receiver_pid=$!
         echo "$receiver_pid" > "$PIDFILE"
-        for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+        attempt=0
+        while [ "$attempt" -lt 60 ]; do
+            attempt=$((attempt + 1))
             if [ -f "$READY" ] && kill -0 "$receiver_pid" 2>/dev/null; then
                 check_local
                 exit $?
             fi
             kill -0 "$receiver_pid" 2>/dev/null || break
+            if [ "$attempt" = 15 ] || [ "$attempt" = 30 ] || [ "$attempt" = 45 ]; then
+                /usr/bin/qndb -m mwcToast 5000 'Still starting Receive & Share...'
+            fi
             sleep 1
         done
         echo 'Receiver could not start. Connect Wi-Fi first and try again.'

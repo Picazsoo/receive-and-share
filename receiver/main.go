@@ -30,6 +30,7 @@ const maxUpload = 100 << 20
 
 type receiver struct {
 	received                                                    []receivedFile
+	deleted                                                     []receivedFile
 	preferIP                                                    bool
 	leaseMu                                                     sync.Mutex
 	browserFirst, browserLast                                   time.Time
@@ -37,6 +38,9 @@ type receiver struct {
 	settingsMu                                                  sync.Mutex
 	shareMu                                                     sync.RWMutex
 	shareAll, rememberShareAll                                  bool
+	allowDelete                                                 bool
+	deleteMu                                                    sync.Mutex
+	deleteJobs                                                  map[string]*deleteJob
 	shared                                                      map[string]bool
 	shareRevision                                               int
 	netMu                                                       sync.RWMutex
@@ -67,6 +71,9 @@ func wifiIP() (string, error) {
 	i, err := net.InterfaceByName("wlan0")
 	if err != nil {
 		return "", err
+	}
+	if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagRunning == 0 {
+		return "", fmt.Errorf("turn on Wi-Fi and connect to a network before starting Receive & Share")
 	}
 	addrs, err := i.Addrs()
 	if err != nil {
@@ -117,11 +124,8 @@ func (s *receiver) finish(w http.ResponseWriter, r *http.Request) {
 	rc.SetWriteDeadline(time.Now().Add(requestTimeout))
 	w.Header().Set("Connection", "close")
 	count, total, files := s.receivedSnapshot(0)
-	render(w, finishedPage, struct {
-		Count int
-		Total int64
-		Files []receivedFile
-	}{count, total, files})
+	deletedTotal, deleted := s.deletedSnapshot()
+	render(w, finishedPage, finishedSession{Count: count, Total: total, Files: files, DeletedCount: len(deleted), DeletedTotal: deletedTotal, Deleted: deleted})
 }
 
 // finishTransfers serializes finish attempts: a concurrent caller waits for the
@@ -129,6 +133,10 @@ func (s *receiver) finish(w http.ResponseWriter, r *http.Request) {
 func (s *receiver) finishTransfers() error {
 	s.finishMu.Lock()
 	defer s.finishMu.Unlock()
+	return s.finishTransfersLocked()
+}
+
+func (s *receiver) finishTransfersLocked() error {
 	if s.finished {
 		return nil
 	}
@@ -228,6 +236,7 @@ func (s *receiver) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	var tempPath, name string
 	var uploadedSize int64
+	convert := r.Header.Get("X-Convert-EPUB") == "1"
 	// The basic form sends its CSRF token as a field before the file, keeping it out of the URL.
 	formToken := r.URL.Path != "/upload"
 	defer func() {
@@ -248,6 +257,12 @@ func (s *receiver) upload(w http.ResponseWriter, r *http.Request) {
 			b, _ := io.ReadAll(io.LimitReader(part, 128))
 			part.Close()
 			formToken = formToken || equal(string(b), s.session(r))
+			continue
+		}
+		if r.URL.Path == "/upload" && part.FormName() == "convert" && part.FileName() == "" {
+			b, _ := io.ReadAll(io.LimitReader(part, 8))
+			part.Close()
+			convert = string(b) == "1"
 			continue
 		}
 		if part.FormName() != "book" || part.FileName() == "" {
@@ -297,6 +312,40 @@ func (s *receiver) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
+	if convert && convertible(name) {
+		s.conversionStatus(r, "converting", "")
+		converted, e := os.CreateTemp(s.temp, "converted-*")
+		if e != nil {
+			http.Error(w, "Cannot create conversion file. Check free storage.", 500)
+			return
+		}
+		convertedPath := converted.Name()
+		converted.Close()
+		defer os.Remove(convertedPath)
+		if err = convertUpload(tempPath, convertedPath); err != nil {
+			s.conversionStatus(r, "failed", err.Error())
+			if r.URL.Path == "/api/upload" {
+				http.Error(w, err.Error(), 422)
+			} else {
+				w.WriteHeader(422)
+				render(w, pageHead+`<h1>Conversion failed</h1><p>{{.}}</p><p>The book was not saved. Go back, turn conversion off and select the original EPUB again.</p><a href="/basic">Back to uploads</a></body></html>`, err.Error())
+			}
+			return
+		}
+		if err = validate(convertedPath, "book.epub"); err != nil {
+			http.Error(w, "Converted EPUB is invalid. Retry the original EPUB without conversion.", 422)
+			return
+		}
+		info, e := os.Stat(convertedPath)
+		if e != nil {
+			http.Error(w, "Could not read converted book", 500)
+			return
+		}
+		uploadedSize = info.Size()
+		os.Remove(tempPath)
+		tempPath = convertedPath
+		name = strings.TrimSuffix(name, filepath.Ext(name)) + ".kepub.epub"
+	}
 	saved, err := s.save(tempPath, name)
 	if err != nil {
 		http.Error(w, "Could not save the book. Check free storage and retry.", 500)
@@ -325,6 +374,10 @@ func (s *receiver) save(path, name string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stem, ext := strings.TrimSuffix(name, filepath.Ext(name)), filepath.Ext(name)
+	// Kobo recognizes KEPUB by the complete compound suffix, including duplicates.
+	if strings.HasSuffix(strings.ToLower(name), ".kepub.epub") {
+		stem, ext = name[:len(name)-len(".kepub.epub")], name[len(name)-len(".kepub.epub"):]
+	}
 	for n := 0; n < 10000; n++ {
 		candidate := name
 		if n > 0 {
@@ -407,7 +460,7 @@ const pageHead = `<!doctype html><html><head><meta charset="utf-8"><meta name="v
 const screenPage = pageHead + `<h1>Receive & Share</h1><p>Scan with your phone's camera.</p><div class="qr"><img src="/qr.png" width="420" height="420" alt="Upload link QR code"></div><form action="/finish" method="post"><input type="hidden" name="token" value="{{.Token}}"><button type="submit">Finish &amp; refresh library</button></form><p>Connect your phone to the same Wi-Fi as this Kobo.</p><p class="address">{{.URL}}</p><small>Keep the Kobo awake. This session lasts up to 20 minutes. EPUB / PDF, up to 100 MiB per file.</small></body></html>`
 const uploadPage = pageHead + `<h1>Send a book to Kobo</h1><p>Choose an EPUB or PDF from Files on your phone.</p><form action="{{.Action}}" method="post" enctype="multipart/form-data"><input type="file" name="book" accept=".epub,.pdf,application/epub+zip,application/pdf" required><button type="submit">Send to Kobo</button></form><p><small>Up to 100 MiB. Keep this page open until confirmation appears. Files stay on your local network.</small></p></body></html>`
 const successPage = pageHead + `<h1>Book received</h1><p><b>{{.Name}}</b></p><p>Saved on your Kobo. When done sending, tap <b>Finish &amp; refresh library</b> on the Kobo's QR page.</p><a class="button" href="{{.Back}}">Send another book</a></body></html>`
-const finishedPage = pageHead + `<style>.finished-files{list-style:none;padding:0}.finished-files li{border-top:1px solid #aaa;padding:14px 0;word-wrap:break-word}.finished-files strong{font-size:20px}.finished-meta{font-size:16px;margin-top:5px}</style><h1>Session finished</h1><p>Sharing has stopped and the library refresh has been requested.</p><h2>{{.Count}} book{{if ne .Count 1}}s{{end}} received</h2><p>Total: {{size .Total}}</p><ul class="finished-files">{{range .Files}}<li><strong>{{display .Name}}</strong><div class="finished-meta">{{.Type}} · {{size .Size}} · {{.Time}}</div></li>{{else}}<li>No books received during this session.</li>{{end}}</ul><p>Close this window to return to your Kobo.</p></body></html>`
+const finishedPage = pageHead + `<style>.finished-files{list-style:none;padding:0}.finished-files li{border-top:1px solid #aaa;padding:14px 0;word-wrap:break-word}.finished-files strong{font-size:20px}.finished-meta{font-size:16px;margin-top:5px}</style><h1>Session finished</h1><p>Sharing has stopped and the library refresh has been requested.</p><h2>{{.Count}} book{{if ne .Count 1}}s{{end}} received</h2><p>Total: {{size .Total}}</p><ul class="finished-files">{{range .Files}}<li><strong>{{display .Name}}</strong><div class="finished-meta">{{.Type}} · {{size .Size}} · {{.Time}}</div></li>{{else}}<li>No books received during this session.</li>{{end}}</ul><h2>{{.DeletedCount}} book{{if ne .DeletedCount 1}}s{{end}} deleted</h2><p>Total: {{size .DeletedTotal}}</p><ul class="finished-files">{{range .Deleted}}<li><strong>{{display .Name}}</strong><div class="finished-meta path">/{{display .Path}}</div><div class="finished-meta">{{.Type}} · {{size .Size}} · {{.Time}}</div></li>{{else}}<li>No books deleted during this session.</li>{{end}}</ul><p>Close this window to return to your Kobo.</p></body></html>`
 
 func nickelCommand(method string) error {
 	log.Printf("NickelDBus command started: %s", method)
@@ -433,6 +486,12 @@ func requestLibraryScan(command func(string) error, finished chan<- struct{}) er
 }
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "__convert-epub" {
+		if err := conversionWorker(os.Args[2], os.Args[3]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
@@ -456,12 +515,6 @@ func run() error {
 	var err error
 	if *ip == "" {
 		*ip, err = wifiIP()
-		// The previous session restores Wi-Fi asynchronously on exit. Its driver
-		// may briefly remove wlan0 while an immediate restart is already launching.
-		for attempt := 0; err != nil && attempt < 20; attempt++ {
-			time.Sleep(time.Second)
-			*ip, err = wifiIP()
-		}
 		if err != nil {
 			return err
 		}
@@ -506,9 +559,9 @@ func run() error {
 	s.onFinish = func() error {
 		return requestLibraryScan(nickelCommand, finishRequested)
 	}
-	s.url = fmt.Sprintf("http://%s:%d/", *ip, *port)
+	s.url = address(*ip, *port)
 	s.fallbackURL = s.url
-	s.qr, err = qrcode.Encode(s.url, qrcode.Medium, 420)
+	s.qr, err = qrcode.Encode(strings.TrimSuffix(s.url, "/"), qrcode.Medium, 420)
 	if err != nil {
 		return err
 	}
