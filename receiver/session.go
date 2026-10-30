@@ -7,12 +7,20 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/text/unicode/norm"
 )
 
 func displayText(s string) string { return norm.NFC.String(s) }
-func searchText(s string) string  { return strings.ToLower(displayText(s)) }
+func searchText(s string) string {
+	return strings.ToLower(strings.Map(func(r rune) rune {
+		if unicode.IsMark(r) {
+			return -1
+		}
+		return r
+	}, norm.NFD.String(s)))
+}
 func humanSize(n int64) string {
 	if n >= 900000 {
 		return fmt.Sprintf("%.1f MB", float64(n)/1000000)

@@ -92,4 +92,10 @@ assert.match(node('#modal-content').innerHTML,/Delete permanently/);
 assert.match(node('#modal-content').innerHTML,/Books\/a.pdf/);
 await node('#delete-confirm').onsubmit({preventDefault(){},target:{querySelector:()=>node('delete-submit')}});
 assert.equal(deletions,1);assert.match(node('#modal-content').innerHTML,/1 of 2 books deleted/);assert.match(node('#modal-content').innerHTML,/Book changed/);
-console.log('PASS: reconnect isolation, conversion fallback, and explicit bulk-deletion confirmation with per-file results.');
+const searchable=[{path:'Books/Harry Potter ohnivy\u0301 poha\u0301r.pdf',name:'Harry Potter ohnivý pohár.pdf',type:'PDF',size:24},{path:'Books/Zlatý Řez.pdf',name:'Zlatý Řez.pdf',type:'PDF',size:42}];
+app.seedFiles(searchable);
+for(const [query,want,other] of [['ohnivy','Harry Potter ohnivý pohár.pdf','Zlatý Řez.pdf'],['OHNIVÝ','Harry Potter ohnivý pohár.pdf','Zlatý Řez.pdf'],['zlaty rez','Zlatý Řez.pdf','Harry Potter ohnivý pohár.pdf'],['ZLATÝ ŘEZ','Zlatý Řez.pdf','Harry Potter ohnivý pohár.pdf']]){
+ node('#file-search').oninput({target:{value:query}});
+ assert.ok(node('#library-list').innerHTML.includes(want));assert.ok(!node('#library-list').innerHTML.includes(other));
+}
+console.log('PASS: reconnect isolation, conversion fallback, deletion confirmation and case/diacritic-insensitive search.');

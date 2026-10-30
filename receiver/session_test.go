@@ -33,6 +33,29 @@ func TestComposedDisplayKeepsOriginalDownloadPath(t *testing.T) {
 		t.Fatal("composed search could not find decomposed filename", w.Body)
 	}
 }
+
+func TestSearchIgnoresCaseAndDiacritics(t *testing.T) {
+	s := fixture(t)
+	seed(t, s, "Harry Potter ohnivy\u0301 poha\u0301r.pdf")
+	seed(t, s, "Books/Zlatý Řez.pdf")
+	for _, tc := range []struct{ query, want, other string }{
+		{"ohnivy", "Harry Potter ohnivý pohár.pdf", "Zlatý Řez.pdf"},
+		{"OHNIVÝ", "Harry Potter ohnivý pohár.pdf", "Zlatý Řez.pdf"},
+		{"zlaty rez", "Zlatý Řez.pdf", "Harry Potter ohnivý pohár.pdf"},
+		{"ZLATÝ ŘEZ", "Zlatý Řez.pdf", "Harry Potter ohnivý pohár.pdf"},
+	} {
+		for _, endpoint := range []string{"/basic", "/share-settings"} {
+			r := httptest.NewRequest("GET", "http://kobo"+endpoint+"?q="+url.QueryEscape(tc.query), nil)
+			r.RemoteAddr = "127.0.0.1:1234"
+			r.Header.Set("Cookie", "kobo_session=test-cookie")
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, r)
+			if w.Code != 200 || !strings.Contains(w.Body.String(), tc.want) || strings.Contains(w.Body.String(), tc.other) {
+				t.Fatal(endpoint, tc.query, w.Code, w.Body)
+			}
+		}
+	}
+}
 func TestSessionReceiptsAndLocalLiveFeed(t *testing.T) {
 	s := fixture(t)
 	if w := post(t, s, "poha\u0301r.pdf", []byte("%PDF-1.7\nhello")); w.Code != 200 {
