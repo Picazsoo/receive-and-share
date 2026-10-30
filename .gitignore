@@ -19,3 +19,7 @@
 id_ed25519*
 host_ed25519*
 authorized_keys
+
+/package/.adds/kobo-receive/hostapd
+/package/.adds/kobo-receive/hotspot-dhcp
+/package/.adds/kobo-receive/hotspot-sources/

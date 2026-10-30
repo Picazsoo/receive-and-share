@@ -51,6 +51,14 @@ an actual Kobo update cycle. [Manual ZIP installation and other details](docs/US
    server and asks Kobo to import received books. Closing the source browser also
    finishes the session after about 20 seconds when its heartbeat is working.
 
+Without a router, use **Receive & Share (hotspot)** instead. Scan the first QR
+to join the Kobo's password-protected Wi-Fi, tap **Next**, then scan the address.
+The password is also shown as text for another Kobo. No pairing code is needed;
+all books are shared and deletion is disabled. Native dialogs replace the source
+browser. The hotspot has no internet. Finishing restores the previous Wi-Fi
+state. This experimental mode depends on the Wi-Fi driver and is tested only
+on Libra 2. [Hotspot details](docs/USAGE.md#hotspot-mode).
+
 Uploads go into `Received Books`. Existing files are kept; duplicates get numbered
 names. The limit is **100 MiB per file**, with a **20-minute session**. Pairing codes
 expire after two minutes; paired browsers stay connected for the session.

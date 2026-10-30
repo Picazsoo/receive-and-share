@@ -2,6 +2,46 @@
 
 [Project README](../README.md). Commands and file paths below are relative to the repository root unless stated otherwise.
 
+## Hotspot mode
+
+Open **NickelMenu → Receive & Share (hotspot)** to transfer without a router.
+The Kobo switches from its normal Wi-Fi connection to a temporary WPA2 network.
+It cannot stay connected to a router at the same time on the tested Libra 2.
+
+1. Scan the Wi-Fi QR code with the phone's camera, or enter the displayed network
+   name and password. Both are generated afresh each session.
+   Passwords use three pronounceable lowercase groups, such as `bavok-mepun-tazif`.
+2. Accept staying connected without internet. The hotspot does not provide it.
+3. Tap **Next** on the Kobo.
+4. Scan the second QR code, or open the displayed address. No pairing code is needed.
+5. Transfer books as usual. **Finish & refresh library** stops the hotspot and
+   restores the previous Wi-Fi state. Wi-Fi stays off if it was off beforehand.
+
+Native dialogs display the source QR codes because Kobo's stock browser requires
+a router connection. **Wi-Fi QR** returns to step 1. The network name and password
+are also readable for manual entry on another Kobo. Closing a dialog with X
+finishes the session, as does **Finish & refresh**.
+
+Hotspot mode shares all book folders, with system folders hidden, for that session.
+It does not change the saved normal-mode sharing preference. Selective sharing
+and deletion settings remain available in normal Wi-Fi mode; deletion is always
+disabled in hotspot mode. The Wi-Fi password grants access, so there is no second
+pairing code. Browser cookies, CSRF protection and Host checks still apply, and
+remote clients must be on the hotspot subnet. The source password is never served
+to remote web clients. WPA2 protects the wireless link; the website uses HTTP.
+
+A separate guard process restores networking if the receiver crashes. If a
+saved network is unavailable, restoration retries; you can also reconnect using
+Kobo's Wi-Fi settings. A reboot removes temporary hotspot state. Finish the
+current session before switching between normal Wi-Fi and hotspot mode.
+
+This is experimental and depends on the installed Wi-Fi driver. Supported test
+device: Kobo Libra 2, firmware 4.38.23697, stock RTL8723DS driver. Other models,
+iOS, sleep/reconnect behavior and Kobo-to-Kobo use in hotspot mode need testing.
+Temporary credentials and helper logs live under `/tmp/kobo-receive-hotspot`.
+The package includes hostapd, a minimal BusyBox DHCP server, their licenses and
+corresponding source. See [helper build instructions](../tools/hotspot/README.md).
+
 ## Optional EPUB conversion
 
 Enable **Convert EPUB to Kobo EPUB (.kepub.epub)** before sending files in either

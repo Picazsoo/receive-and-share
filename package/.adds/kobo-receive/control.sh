@@ -52,20 +52,36 @@ prepare_browser() {
 }
 
 case "$1" in
-    open)
+    open|open-hotspot)
         exec > "$APP/open.log" 2>&1 < /dev/null
-        if ! wifi_connected; then
+        MODE=wifi
+        [ "$1" = open-hotspot ] && MODE=hotspot
+        if running && [ "$(cat "$APP/active-mode" 2>/dev/null)" != "$MODE" ]; then
+            /usr/bin/qndb -m mwcToast 5000 'Finish the current session before switching Wi-Fi mode.'
+            exit 1
+        fi
+        if [ "$MODE" = wifi ] && ! wifi_connected; then
             /usr/bin/qndb -m mwcToast 5000 'Turn on Wi-Fi, connect, then try again.'
             exit 1
         fi
         /usr/bin/qndb -m mwcToast 5000 'Starting Receive & Share...'
-        if ! /bin/sh "$APP/control.sh" start; then
-            /usr/bin/qndb -m mwcToast 5000 'Could not start. Check Wi-Fi and try again.'
+        START=start
+        [ "$MODE" = hotspot ] && START=start-hotspot
+        if ! /bin/sh "$APP/control.sh" "$START"; then
+            if [ "$MODE" = hotspot ]; then
+                /usr/bin/qndb -m mwcToast 5000 'Could not start hotspot. See receiver.log.'
+            else
+                /usr/bin/qndb -m mwcToast 5000 'Could not start. Check Wi-Fi and try again.'
+            fi
             exit 1
         fi
         if ! prepare_browser; then
             /usr/bin/qndb -m mwcToast 5000 'Session is finishing. Wait a moment and try again.'
             exit 1
+        fi
+        if [ "$MODE" = hotspot ]; then
+            if ! check_local; then exit 1; fi
+            exec wget -T 3 -qO /tmp/kobo-receive-hotspot-open.txt --post-data="token=$token" http://127.0.0.1:$PORT/local-hotspot-open
         fi
         # Native browser startup itself requests Wi-Fi. Wait for the temporary
         # ForceWifiOn reconnect to finish so it does not open a connection dialog.
@@ -89,11 +105,13 @@ case "$1" in
         /usr/bin/qndb -m mwcToast 5000 'Wi-Fi is still connecting. Connect, then try again.'
         exit 1
         ;;
-    start)
+    start|start-hotspot)
         exec > /tmp/kobo-receive-start.log 2>&1
         date
-        echo 'Launcher revision: manual-wifi-6'
-        if ! wifi_connected; then
+        echo 'Launcher revision: hotspot-1'
+        MODE=wifi
+        [ "$1" = start-hotspot ] && MODE=hotspot
+        if [ "$MODE" = wifi ] && ! wifi_connected; then
             echo 'Turn on Wi-Fi, connect to a network, then launch Receive & Share again.'
             exit 1
         fi
@@ -104,6 +122,10 @@ case "$1" in
             exit 1
         }
         if running && [ -f "$READY" ]; then
+            if [ "$(cat "$APP/active-mode" 2>/dev/null)" != "$MODE" ]; then
+                echo 'Finish the current session before switching Wi-Fi mode.'
+                exit 1
+            fi
             echo 'Using existing receiver.'
             check_local
             exit $?
@@ -115,7 +137,12 @@ case "$1" in
         rm -f "$READY"
         chmod +x "$APP/kobo-receive" || exit 1
         printf '%s\n' "$PORT" > "$APP/active-port"
-        "$APP/kobo-receive" -port "$PORT" -ready "$READY" > "$APP/receiver.log" 2>&1 < /dev/null &
+        printf '%s\n' "$MODE" > "$APP/active-mode"
+        if [ "$MODE" = hotspot ]; then
+            "$APP/kobo-receive" -hotspot -port "$PORT" -ready "$READY" > "$APP/receiver.log" 2>&1 < /dev/null &
+        else
+            "$APP/kobo-receive" -port "$PORT" -ready "$READY" > "$APP/receiver.log" 2>&1 < /dev/null &
+        fi
         receiver_pid=$!
         echo "$receiver_pid" > "$PIDFILE"
         attempt=0
@@ -147,8 +174,8 @@ case "$1" in
                 exit 1
             fi
         fi
-        rm -f "$PIDFILE" "$READY" "$APP/active-port"
+        rm -f "$PIDFILE" "$READY" "$APP/active-port" "$APP/active-mode"
         sync
         ;;
-    *) echo 'Use open, start or stop'; exit 1 ;;
+    *) echo 'Use open, open-hotspot, start, start-hotspot or stop'; exit 1 ;;
 esac

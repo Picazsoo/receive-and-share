@@ -29,6 +29,10 @@ import (
 const maxUpload = 100 << 20
 
 type receiver struct {
+	hotspot                                                     *hotspotNetwork
+	hotspotUIMu                                                 sync.Mutex
+	hotspotUIDone                                               chan struct{}
+	hotspotContext                                              context.Context
 	received                                                    []receivedFile
 	deleted                                                     []receivedFile
 	preferIP                                                    bool
@@ -486,6 +490,12 @@ func requestLibraryScan(command func(string) error, finished chan<- struct{}) er
 }
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "__hotspot-guard" {
+		if err := hotspotGuard(os.Args[2], os.Args[3]); err != nil {
+			log.Print(err)
+		}
+		return
+	}
 	if len(os.Args) == 4 && os.Args[1] == "__convert-epub" {
 		if err := conversionWorker(os.Args[2], os.Args[3]); err != nil {
 			log.Fatal(err)
@@ -511,8 +521,24 @@ func run() error {
 	config := flag.String("config", "", "device-name settings file (default beside temporary directory)")
 	mdns := flag.Bool("mdns", true, "advertise a .local hostname on Wi-Fi")
 	keepWiFi := flag.Bool("keep-wifi", runtime.GOOS == "linux", "retain Wi-Fi while receiving and restore its previous preference on exit")
+	hotspot := flag.Bool("hotspot", false, "create a temporary WPA2 Wi-Fi network (experimental, Libra 2)")
 	flag.Parse()
 	var err error
+	var network *hotspotNetwork
+	if *hotspot {
+		if *ttl <= 0 || *ttl > time.Hour {
+			return fmt.Errorf("hotspot sessions must last between zero and one hour")
+		}
+		var cleanup func()
+		network, cleanup, err = startHotspot(*ttl)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		*ip = hotspotIP
+		*keepWiFi = false
+		*mdns = false
+	}
 	if *ip == "" {
 		*ip, err = wifiIP()
 		if err != nil {
@@ -532,9 +558,12 @@ func run() error {
 	if _, err = rand.Read(token); err != nil {
 		return err
 	}
-	s := &receiver{token: hex.EncodeToString(token), dest: *dest, temp: *temp}
+	s := &receiver{token: hex.EncodeToString(token), dest: *dest, temp: *temp, hotspot: network}
 	s.instance = secret()
 	s.autoFinish = *autoFinish
+	if network != nil {
+		s.autoFinish = false
+	}
 	if *config == "" {
 		*config = filepath.Join(filepath.Dir(*temp), "settings.json")
 	}
@@ -545,6 +574,9 @@ func run() error {
 	}
 	s.deviceName = settings.Name
 	s.shareAll = settings.ShareAll
+	if network != nil {
+		s.shareAll = true
+	}
 	s.rememberShareAll = settings.ShareAll
 	s.shared = make(map[string]bool)
 	s.allowedHosts = map[string]bool{fmt.Sprintf("%s:%d", *ip, *port): true, fmt.Sprintf("127.0.0.1:%d", *port): true, *ip: true, "127.0.0.1": true}
@@ -578,6 +610,7 @@ func run() error {
 		wifiSettled = settled
 	}
 	networkCtx, stopNetwork := context.WithCancel(context.Background())
+	s.hotspotContext = networkCtx
 	var networkDone chan struct{}
 	defer func() {
 		stopNetwork()
@@ -638,6 +671,10 @@ func run() error {
 	}
 	// Stop accepting uploads, then let in-flight file writes finish before exit/import.
 	shutdownReceiver(server, s)
+	if network != nil {
+		stopNetwork()
+		s.closeHotspotUI()
+	}
 	return nil
 }
 

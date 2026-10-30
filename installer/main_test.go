@@ -19,16 +19,19 @@ func fixture(t *testing.T) string {
 	copy(elf, []byte{127, 'E', 'L', 'F', 1, 1})
 	elf[18] = 40
 	inputs := map[string][]byte{
-		".adds/kobo-receive/kobo-receive":            elf,
-		".adds/kobo-receive/control.sh":              []byte("#!/bin/sh\r\necho ready\r\n"),
-		".adds/kobo-receive/QR-LICENSE.txt":          []byte("license"),
-		".adds/kobo-receive/LICENSE":                 []byte("application MIT license"),
-		".adds/kobo-receive/licenses/dependency.txt": []byte("license"),
-		".adds/nm/kobo-receive":                      []byte("menu_item:main:Receive & Share:cmd_spawn:quiet:launch"),
-		"README.md":                                  []byte("readme"),
-		".adds/kobo-receive/settings.json":           []byte("private settings"),
-		".adds/kobo-receive/port.txt":                []byte("80"),
-		".adds/nm/config":                            []byte("custom menu"),
+		".adds/kobo-receive/kobo-receive":              elf,
+		".adds/kobo-receive/hostapd":                   elf,
+		".adds/kobo-receive/hotspot-dhcp":              elf,
+		".adds/kobo-receive/hotspot-sources/README.md": []byte("source instructions"),
+		".adds/kobo-receive/control.sh":                []byte("#!/bin/sh\r\necho ready\r\n"),
+		".adds/kobo-receive/QR-LICENSE.txt":            []byte("license"),
+		".adds/kobo-receive/LICENSE":                   []byte("application MIT license"),
+		".adds/kobo-receive/licenses/dependency.txt":   []byte("license"),
+		".adds/nm/kobo-receive":                        []byte("menu_item:main:Receive & Share:cmd_spawn:quiet:launch"),
+		"README.md":                                    []byte("readme"),
+		".adds/kobo-receive/settings.json":             []byte("private settings"),
+		".adds/kobo-receive/port.txt":                  []byte("80"),
+		".adds/nm/config":                              []byte("custom menu"),
 	}
 	for name, data := range inputs {
 		p := filepath.Join(pkg, filepath.FromSlash(name))

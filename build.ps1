@@ -11,6 +11,7 @@ if (-not $Go) {
     }
 }
 if (-not $Go) { throw 'Install Go or supply -Go with the compiler path.' }
+& "$PSScriptRoot\build-hotspot.ps1"
 $env:GOPATH = "$PSScriptRoot\receiver\.gomodcache"
 $env:GOCACHE = "$PSScriptRoot\receiver\.gocache"
 $env:CGO_ENABLED = '0'

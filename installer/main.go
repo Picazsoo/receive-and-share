@@ -129,6 +129,8 @@ func collect(packageDir, inputs, dependencies string) (map[string]file, error) {
 	}{
 		{".adds/kobo-receive/kobo-receive", app + "kobo-receive", 0755},
 		{".adds/kobo-receive/control.sh", app + "control.sh", 0755},
+		{".adds/kobo-receive/hostapd", app + "hostapd", 0755},
+		{".adds/kobo-receive/hotspot-dhcp", app + "hotspot-dhcp", 0755},
 		{".adds/kobo-receive/QR-LICENSE.txt", app + "QR-LICENSE.txt", 0644},
 		{".adds/kobo-receive/LICENSE", app + "LICENSE", 0644},
 		{".adds/nm/kobo-receive", "mnt/onboard/.adds/nm/kobo-receive", 0644},
@@ -138,12 +140,15 @@ func collect(packageDir, inputs, dependencies string) (map[string]file, error) {
 			return nil, err
 		}
 	}
-	executable := files[app+"kobo-receive"].data
-	if len(executable) < 20 || !bytes.Equal(executable[:4], []byte{127, 'E', 'L', 'F'}) || executable[4] != 1 || executable[5] != 1 || binary.LittleEndian.Uint16(executable[18:20]) != 40 {
-		return nil, fmt.Errorf("receiver must be a little-endian ELF32 ARM executable")
+	for _, name := range []string{"kobo-receive", "hostapd", "hotspot-dhcp"} {
+		executable := files[app+name].data
+		if len(executable) < 20 || !bytes.Equal(executable[:4], []byte{127, 'E', 'L', 'F'}) || executable[4] != 1 || executable[5] != 1 || binary.LittleEndian.Uint16(executable[18:20]) != 40 {
+			return nil, fmt.Errorf("%s must be a little-endian ELF32 ARM executable", name)
+		}
 	}
 	for _, dir := range []struct{ src, dst string }{
 		{filepath.Join(packageDir, ".adds/kobo-receive/licenses"), app + "licenses/"},
+		{filepath.Join(packageDir, ".adds/kobo-receive/hotspot-sources"), app + "hotspot-sources/"},
 		{filepath.Join(packageDir, "..", "docs"), app + "docs/"},
 	} {
 		if err := filepath.WalkDir(dir.src, func(p string, d fs.DirEntry, err error) error {

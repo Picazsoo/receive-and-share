@@ -1,1 +1,2 @@
 menu_item:main:Receive & Share:cmd_spawn:quiet:/bin/sh /mnt/onboard/.adds/kobo-receive/control.sh open
+menu_item:main:Receive & Share (hotspot):cmd_spawn:quiet:/bin/sh /mnt/onboard/.adds/kobo-receive/control.sh open-hotspot
